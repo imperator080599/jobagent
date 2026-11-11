@@ -20,6 +20,13 @@ import { setFact } from './facts.js';
 
 export type CvVersion = typeof cvVersions.$inferSelect;
 
+type MasterHook = (ctx: UserContext, master: CvVersion) => Promise<void>;
+const masterApprovedHooks: MasterHook[] = [];
+/** Les autres modules (documents, pipeline) réagissent à la validation d'un nouveau CV master. */
+export function onMasterApproved(hook: MasterHook) {
+  masterApprovedHooks.push(hook);
+}
+
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 async function nextVersion(db: Db, userId: string, kind: CvVersion['kind'], language: string): Promise<number> {
@@ -245,6 +252,8 @@ export async function approveCv(ctx: UserContext, id: string): Promise<CvVersion
     await resolveAction(ctx.db, ctx.userId, { dedupKey: 'setup.cv_master' }, { cvId: id });
     await syncFactsFromCv(ctx, approved);
     await unblockByReason(ctx.db, ctx.userId, ['cv_master_missing']);
+    // Le template de CV suit le master : constitué ou mis à jour dès la validation.
+    for (const hook of masterApprovedHooks) await hook(ctx, approved);
   }
   return approved;
 }

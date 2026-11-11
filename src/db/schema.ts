@@ -218,6 +218,41 @@ export const cvVersions = pgTable(
 );
 
 /**
+ * Templates de documents (CV, lettre). Le fichier d'origine est conservé tel quel ;
+ * le document de travail est toujours un DOCX. Chaque import crée une nouvelle
+ * version : aucune n'est jamais écrasée.
+ */
+export const templates = pgTable(
+  'templates',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<'cv' | 'letter'>().notNull(),
+    name: text('name').notNull(),
+    language: text('language').notNull().default(''),
+    version: integer('version').notNull().default(1),
+    isActive: boolean('is_active').notNull().default(false),
+    /** upload = fichier fourni par l'utilisateur ; built = document Word constitué à partir du CV (faute de fichier Word) ; evolved = template mis à jour après une nouvelle version du master. */
+    origin: text('origin').$type<'upload' | 'built' | 'evolved'>().notNull().default('upload'),
+    sourceFileId: text('source_file_id').notNull(),
+    docxFileId: text('docx_file_id').notNull(),
+    previewFileId: text('preview_file_id'),
+    pdfFileId: text('pdf_file_id'),
+    /** Analyse du template : rôles des paragraphes, rubriques, polices, marges. */
+    profile: jsonb('profile').$type<Json>().notNull(),
+    /** Mesures du rendu du template lui-même (référence du contrôle qualité). */
+    baseline: jsonb('baseline').$type<Json>(),
+    /** CV master sur lequel un template de CV est aligné. */
+    masterCvId: text('master_cv_id'),
+    notes: jsonb('notes').$type<string[]>().notNull().default([]),
+    createdAt: createdAt(),
+  },
+  (t) => [index('templates_user_idx').on(t.userId, t.kind, t.isActive)],
+);
+
+/**
  * Référentiel personnel : une information validée par clé, avec sa source.
  * Une clé validée n'est jamais redemandée à l'utilisateur.
  */

@@ -23,7 +23,7 @@ function encodeRandom(len: number): string {
 export type IdPrefix =
   | 'usr' | 'ses' | 'tok' | 'act' | 'fil' | 'cv' | 'fact' | 'qa' | 'atp' | 'fb' | 'lis' | 'pdf'
   | 'sp' | 'co' | 'src' | 'run' | 'job' | 'sgt' | 'stg' | 'llm' | 'ats' | 'let' | 'app' | 'att'
-  | 'todo' | 'task' | 'eml' | 'dft' | 'itv' | 'ct' | 'ntf' | 'evl';
+  | 'todo' | 'task' | 'eml' | 'dft' | 'itv' | 'ct' | 'ntf' | 'evl' | 'tpl';
 
 export function newId(prefix: IdPrefix, now: number = Date.now()): string {
   return `${prefix}_${encodeTime(now)}${encodeRandom(14)}`;

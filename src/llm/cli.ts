@@ -75,7 +75,9 @@ export function createCliProvider(): LlmProvider {
       return { text: r.result ?? '', model: served(r, model), provider: 'claude-cli', usage: usage(r), stopReason: r.stop_reason ?? '', refused: r.stop_reason === 'refusal' };
     },
     async json<T>(req: LlmJsonRequest<T>, model: string) {
-      const schema = JSON.stringify(z.toJSONSchema(req.schema));
+      // La CLI n'accepte pas l'en-tête « $schema » : on ne transmet que le schéma lui-même.
+      const { $schema: _ignored, ...jsonSchema } = z.toJSONSchema(req.schema) as Record<string, unknown>;
+      const schema = JSON.stringify(jsonSchema);
       const r = await runCli([...baseArgs(req, model), '--json-schema', schema], `${req.prefix ? `${req.prefix}\n\n` : ''}${req.prompt}`, 15 * 60_000);
       const refused = r.stop_reason === 'refusal';
       let raw: unknown = r.structured_output;
