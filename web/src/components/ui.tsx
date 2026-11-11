@@ -122,7 +122,7 @@ const TONES: Record<Tone, string> = {
 
 export function Badge({ tone = 'neutral', children, className, title }: { tone?: Tone; children: ReactNode; className?: string; title?: string }) {
   return (
-    <span title={title} className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] leading-4 font-medium ring-1 ring-inset', TONES[tone], className)}>
+    <span title={title} className={cx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] leading-4 font-medium whitespace-nowrap ring-1 ring-inset', TONES[tone], className)}>
       {children}
     </span>
   );
@@ -353,7 +353,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((message: string, tone: Tone = 'neutral') => {
     const id = ++seq.current;
     setToasts((t) => [...t.slice(-3), { id, tone, message }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'danger' ? 7000 : 3500);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'danger' || tone === 'warning' ? 8000 : 3500);
   }, []);
   return (
     <ToastContext.Provider value={push}>
@@ -364,7 +364,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             key={t.id}
             className={cx(
               'pointer-events-auto max-w-md animate-in rounded-xl px-4 py-2.5 text-sm font-medium shadow-pop',
-              t.tone === 'danger' ? 'bg-rose-600 text-white' : t.tone === 'success' ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white',
+              t.tone === 'danger' ? 'bg-rose-600 text-white' : t.tone === 'success' ? 'bg-emerald-600 text-white' : t.tone === 'warning' ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white',
             )}
           >
             {t.message}
