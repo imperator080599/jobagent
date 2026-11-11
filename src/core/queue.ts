@@ -98,6 +98,18 @@ export async function unblockTasks(db: Db, idempotencyKey: string): Promise<numb
   return rows.length;
 }
 
+/** Relance les tâches d'un utilisateur bloquées pour un motif donné (clé d'API ajoutée, CV validé…). */
+export async function unblockByReason(db: Db, userId: string, reasons: string[]): Promise<number> {
+  if (!reasons.length) return 0;
+  const match = sql.join(reasons.map((r) => sql`${tasks.lastError} like ${`[${r}]%`}`), sql` or `);
+  const rows = await db
+    .update(tasks)
+    .set({ status: 'queued', runAfter: new Date(), lastError: '' })
+    .where(and(eq(tasks.userId, userId), eq(tasks.status, 'blocked'), sql`(${match})`))
+    .returning({ id: tasks.id });
+  return rows.length;
+}
+
 /** Reprise après interruption : les tâches « en cours » depuis trop longtemps repassent en file. */
 export async function requeueStale(db: Db, opts: { olderThanMinutes?: number; now?: Date } = {}): Promise<number> {
   const now = opts.now ?? new Date();

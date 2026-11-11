@@ -40,7 +40,9 @@ export async function runTask(ctx: AppContext, task: Task): Promise<'done' | 're
   } catch (err) {
     if (err instanceof NeedsHumanError || err instanceof ConfigError) {
       // Rien à réessayer tant que l'utilisateur n'est pas intervenu.
-      await blockTask(ctx.db, task.id, err.message);
+      // Le motif est préfixé pour pouvoir relancer précisément les tâches concernées une fois le problème levé.
+      const tag = err instanceof ConfigError ? err.what : err.reason;
+      await blockTask(ctx.db, task.id, `[${tag}] ${err.message}`);
       log.info('task_blocked', { reason: err.message });
       return 'blocked';
     }

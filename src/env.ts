@@ -16,7 +16,7 @@ export interface Env {
   port: number;
   setupToken: string;
   cronSecret: string;
-  llmProvider: 'anthropic' | 'mock';
+  llmProvider: 'anthropic' | 'mock' | 'claude-cli';
   anthropicApiKey: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
@@ -78,7 +78,7 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
     port: Number(e.PORT || 4000),
     setupToken: e.SETUP_TOKEN ?? '',
     cronSecret: e.CRON_SECRET ?? '',
-    llmProvider: e.LLM_PROVIDER === 'mock' ? 'mock' : 'anthropic',
+    llmProvider: e.LLM_PROVIDER === 'mock' ? 'mock' : e.LLM_PROVIDER === 'claude-cli' ? 'claude-cli' : 'anthropic',
     anthropicApiKey: e.ANTHROPIC_API_KEY ?? '',
     logLevel: (['debug', 'info', 'warn', 'error'].includes(e.LOG_LEVEL ?? '') ? e.LOG_LEVEL : nodeEnv === 'test' ? 'error' : 'info') as Env['logLevel'],
     ...overrides,
