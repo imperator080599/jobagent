@@ -5,6 +5,7 @@ import { overviewRoutes } from './api/routes/overview.js';
 import { filesRoutes, profileRoutes } from './api/routes/profile.js';
 import { inboxRoutes } from './api/routes/inbox.js';
 import { adminRoutes } from './api/routes/admin.js';
+import { linkedinRoutes } from './api/routes/linkedin.js';
 import './profile/index.js';
 
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
@@ -12,3 +13,4 @@ registerRoutes('private', (app, deps) => app.route('/profile', profileRoutes(dep
 registerRoutes('private', (app, deps) => app.route('/files', filesRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/inbox', inboxRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/admin', adminRoutes(deps)));
+registerRoutes('private', (app, deps) => app.route('/profile/linkedin', linkedinRoutes(deps)));

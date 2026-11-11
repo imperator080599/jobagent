@@ -113,32 +113,46 @@ export function emptyCv(language = 'fr'): CvData {
   return CvData.parse({ language });
 }
 
-/** Réattribue des identifiants stables et uniques (après import ou édition manuelle). */
+/**
+ * Attribue un identifiant aux éléments qui n'en ont pas, sans jamais modifier un
+ * identifiant existant : les CV personnalisés et les écarts LinkedIn référencent
+ * les éléments du master par leur identifiant, qui doit donc rester stable d'une
+ * version à l'autre.
+ */
 export function assignIds(cv: CvData): CvData {
   const out: CvData = structuredClone(cv);
   const seen = new Set<string>();
-  const uniq = (wanted: string, fallback: string) => {
-    let id = wanted && !seen.has(wanted) ? wanted : fallback;
-    let n = 2;
-    while (seen.has(id)) id = `${fallback}_${n++}`;
-    seen.add(id);
-    return id;
+  const pending: { set: (id: string) => void; prefix: string }[] = [];
+  const claim = (current: string, prefix: string, set: (id: string) => void) => {
+    if (current && !seen.has(current)) seen.add(current);
+    else pending.push({ set, prefix });
   };
-  out.experiences.forEach((e, i) => {
-    e.id = uniq(e.id, `exp_${i + 1}`);
-    e.bullets.forEach((b, j) => (b.id = uniq(b.id, `${e.id}.b${j + 1}`)));
-  });
-  out.education.forEach((e, i) => {
-    e.id = uniq(e.id, `edu_${i + 1}`);
-    e.details.forEach((b, j) => (b.id = uniq(b.id, `${e.id}.d${j + 1}`)));
-  });
-  out.skills.forEach((s, i) => (s.id = uniq(s.id, `skill_${i + 1}`)));
-  out.languages.forEach((l, i) => (l.id = uniq(l.id, `lang_${i + 1}`)));
-  out.certifications.forEach((c, i) => (c.id = uniq(c.id, `cert_${i + 1}`)));
-  out.extras.forEach((x, i) => {
-    x.id = uniq(x.id, `extra_${i + 1}`);
-    x.items.forEach((b, j) => (b.id = uniq(b.id, `${x.id}.i${j + 1}`)));
-  });
+  const flush = () => {
+    for (const p of pending.splice(0)) {
+      let max = 0;
+      for (const id of seen) {
+        if (id.startsWith(p.prefix)) {
+          const n = Number(id.slice(p.prefix.length));
+          if (Number.isInteger(n) && n > max) max = n;
+        }
+      }
+      const id = `${p.prefix}${max + 1}`;
+      seen.add(id);
+      p.set(id);
+    }
+  };
+  // Premier niveau d'abord (les sous-éléments dérivent leur préfixe de l'identifiant du parent).
+  out.experiences.forEach((e) => claim(e.id, 'exp_', (id) => (e.id = id)));
+  out.education.forEach((e) => claim(e.id, 'edu_', (id) => (e.id = id)));
+  out.skills.forEach((x) => claim(x.id, 'skill_', (id) => (x.id = id)));
+  out.languages.forEach((x) => claim(x.id, 'lang_', (id) => (x.id = id)));
+  out.certifications.forEach((x) => claim(x.id, 'cert_', (id) => (x.id = id)));
+  out.extras.forEach((x) => claim(x.id, 'extra_', (id) => (x.id = id)));
+  flush();
+  out.experiences.forEach((e) => e.bullets.forEach((b) => claim(b.id, `${e.id}.b`, (id) => (b.id = id))));
+  out.education.forEach((e) => e.details.forEach((b) => claim(b.id, `${e.id}.d`, (id) => (b.id = id))));
+  out.extras.forEach((x) => x.items.forEach((b) => claim(b.id, `${x.id}.i`, (id) => (b.id = id))));
+  flush();
   return out;
 }
 
