@@ -26,7 +26,7 @@ describe('dates partielles', () => {
     expect(parsePartialDate('inconnu')).toBe('');
   });
   it('extrait une période et rend le reste de la ligne', () => {
-    expect(extractDateRange("Paris La Défense, France | Septembre 2021 – Aujourd'hui")).toEqual({ start: '2021-09', end: 'present', rest: 'Paris La Défense, France' });
+    expect(extractDateRange("Paris La Défense, France | Septembre 2021 – Aujourd'hui")).toEqual({ start: '2021-09', end: 'present', rest: 'Paris La Défense, France', raw: "Septembre 2021 – Aujourd'hui" });
     expect(extractDateRange('Senior Auditor, Acme Ltd    Jan 2019 - Mar 2021')).toMatchObject({ start: '2019-01', end: '2021-03', rest: 'Senior Auditor, Acme Ltd' });
     expect(extractDateRange('2015 – 2017')).toMatchObject({ start: '2015', end: '2017' });
     expect(extractDateRange('Depuis mars 2023')).toMatchObject({ start: '2023-03', end: 'present' });
@@ -144,7 +144,7 @@ describe('comparaison de versions de CV', () => {
   it('produit un texte complet du CV', () => {
     const cv = parseCvHeuristic(readFileSync(`${FIXTURE}.txt`, 'utf8'));
     const t = cvToText(cv);
-    expect(t).toContain('Auditrice senior (Senior 2) — Hartwell & Associés (Paris La Défense, France) | 09/2021 – Aujourd\'hui');
+    expect(t).toContain("Auditrice senior (Senior 2) — Hartwell & Associés (Paris La Défense, France) | Septembre 2021 – Aujourd'hui");
     expect(t).toContain('Anglais : courant (TOEIC 965)');
   });
 });

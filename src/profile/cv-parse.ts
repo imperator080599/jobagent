@@ -122,6 +122,7 @@ interface Entry {
   header: string[];
   start: string;
   end: string;
+  dates: string;
   bullets: string[];
 }
 
@@ -142,14 +143,14 @@ function splitEntries(lines: string[]): Entry[] {
     }
     const range = !BULLET_RE.test(line) ? extractDateRange(line) : null;
     if (range) {
-      current = { header: range.rest ? [range.rest] : [], start: range.start, end: range.end, bullets: [] };
+      current = { header: range.rest ? [range.rest] : [], start: range.start, end: range.end, dates: range.raw, bullets: [] };
       flushHeaderInto(current);
       entries.push(current);
       continue;
     }
     if (BULLET_RE.test(line)) {
       if (!current) {
-        current = { header: [], start: '', end: '', bullets: [] };
+        current = { header: [], start: '', end: '', dates: '', bullets: [] };
         flushHeaderInto(current);
         entries.push(current);
       }
@@ -167,7 +168,7 @@ function splitEntries(lines: string[]): Entry[] {
   }
   if (pendingHeader.length) {
     if (current) current.bullets.push(...pendingHeader);
-    else entries.push({ header: pendingHeader, start: '', end: '', bullets: [] });
+    else entries.push({ header: pendingHeader, start: '', end: '', dates: '', bullets: [] });
   }
   return entries;
 }
@@ -208,6 +209,8 @@ export function parseCvHeuristic(text: string, language = 'fr'): CvData {
 
   for (const s of sections) {
     const body = s.lines.map((l) => l.trim()).filter(Boolean);
+    // Les titres de rubriques sont conservés tels qu'ils sont écrits dans le document.
+    if (s.key !== 'header' && s.key !== 'extras' && s.title && !cv.titles[s.key]) cv.titles[s.key] = s.title;
     switch (s.key) {
       case 'header':
         parseContact(s.lines, cv);
@@ -219,14 +222,14 @@ export function parseCvHeuristic(text: string, language = 'fr'): CvData {
         for (const e of splitEntries(s.lines)) {
           const h = classifyHeader(e.header, 'experience');
           if (!h.primary && !h.secondary && e.bullets.length === 0) continue;
-          cv.experiences.push({ id: '', company: h.primary, title: h.secondary, location: h.location, start: e.start, end: e.end, contract: '', summary: '', bullets: e.bullets.map((b) => ({ id: '', text: b })) });
+          cv.experiences.push({ id: '', company: h.primary, title: h.secondary, location: h.location, start: e.start, end: e.end, dates: e.dates, contract: '', summary: '', bullets: e.bullets.map((b) => ({ id: '', text: b })) });
         }
         break;
       case 'education':
         for (const e of splitEntries(s.lines)) {
           const h = classifyHeader(e.header, 'education');
           if (!h.primary && !h.secondary) continue;
-          cv.education.push({ id: '', school: h.primary, degree: h.secondary, field: '', location: h.location, start: e.start, end: e.end, details: e.bullets.map((b) => ({ id: '', text: b })) });
+          cv.education.push({ id: '', school: h.primary, degree: h.secondary, field: '', location: h.location, start: e.start, end: e.end, dates: e.dates, details: e.bullets.map((b) => ({ id: '', text: b })) });
         }
         break;
       case 'skills':

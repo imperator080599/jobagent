@@ -8,7 +8,7 @@ import type { UserContext } from '../core/context.js';
 import { coverage, detectLanguage, tokens } from '../core/text.js';
 import { getLlm, llmAvailability } from '../llm/index.js';
 import { registerMock } from '../llm/mock.js';
-import { type CvData, CvData as CvDataSchema, assignIds } from '../shared/cv.js';
+import { type CvData, CvData as CvDataSchema, assignIds, stripMarkup } from '../shared/cv.js';
 import { parseCvHeuristic } from './cv-parse.js';
 import { parsePartialDate } from './dates.js';
 
@@ -24,16 +24,20 @@ export const CvExtraction = z.object({
       location: s,
       start: s.describe('AAAA-MM si le mois est indiqué, sinon AAAA, sinon vide'),
       end: s.describe('AAAA-MM, AAAA, "present" si en cours, sinon vide'),
+      dates: s.describe('Période exactement telle qu\'elle est écrite dans le document (ex. « Sept 2023 – Current »)'),
       contract: s.describe('Type de contrat seulement s\'il est écrit (stage, alternance, CDI…), sinon vide'),
       summary: s,
       bullets: z.array(s),
     }),
   ),
-  education: z.array(z.object({ school: s, degree: s, field: s, location: s, start: s, end: s, details: z.array(s) })),
+  education: z.array(z.object({ school: s, degree: s, field: s, location: s, start: s, end: s, dates: s, details: z.array(s) })),
   skills: z.array(z.object({ label: s, items: z.array(s) })),
   languages: z.array(z.object({ language: s, level: s, certification: s })),
   certifications: z.array(z.object({ name: s, issuer: s, date: s })),
   extras: z.array(z.object({ title: s, items: z.array(s) })),
+  titles: z
+    .object({ summary: s, experiences: s, education: s, skills: s, languages: s, certifications: s })
+    .describe('Titres des rubriques exactement tels qu\'écrits dans le document ; vide si la rubrique est absente'),
 });
 export type CvExtraction = z.infer<typeof CvExtraction>;
 
@@ -46,7 +50,16 @@ Règles :
 - Une puce du document = un élément de liste. Recolle les lignes coupées par la mise en page.
 - Dates : "AAAA-MM" quand le mois est indiqué, "AAAA" sinon, "present" pour un poste en cours.
 - Compétences : garde les regroupements du document (libellé + éléments). Sans regroupement, un seul groupe au libellé vide.
-- Les rubriques hors expériences, formation, compétences, langues et certifications (centres d'intérêt, engagements, projets…) vont dans "extras" avec leur titre d'origine.`;
+- Respecte le découpage en rubriques du document. Seules les rubriques consacrées aux compétences, aux langues ou aux certifications alimentent "skills", "languages" et "certifications". Toute autre rubrique (centres d'intérêt, engagements, projets, ou une rubrique mixte du type « Compétences et activités ») va dans "extras" avec son titre d'origine et ses éléments tels quels.
+- Mise en valeur : quand une partie seulement d'un élément est en gras ou en italique dans le document, encadre-la par **gras** ou *italique*. N'utilise aucune balise si l'élément entier a la même mise en forme.
+- Un élément de liste qui est un paragraphe simple (sans puce) dans le document commence par le caractère ¶.
+- "dates" reprend la période exactement telle qu'elle est écrite ; "titles" reprend les titres de rubriques exactement tels qu'ils sont écrits.`;
+
+/** Un élément préfixé par « ¶ » est un paragraphe simple (sans puce) dans le document d'origine. */
+function toItem(text: string): { id: string; text: string; kind?: 'text' } {
+  const t = text.trim();
+  return t.startsWith('¶') ? { id: '', text: t.replace(/^¶\s*/, ''), kind: 'text' } : { id: '', text: t };
+}
 
 function toCvData(x: CvExtraction): CvData {
   const d = (v: string) => (v === 'present' ? 'present' : parsePartialDate(v));
@@ -55,27 +68,31 @@ function toCvData(x: CvExtraction): CvData {
       language: (x.language || 'fr').slice(0, 2).toLowerCase(),
       identity: { ...x.identity, extra: [] },
       summary: x.summary,
-      experiences: x.experiences.map((e) => ({ id: '', company: e.company, title: e.title, location: e.location, start: d(e.start), end: d(e.end), contract: e.contract, summary: e.summary, bullets: e.bullets.filter(Boolean).map((t) => ({ id: '', text: t })) })),
-      education: x.education.map((e) => ({ id: '', school: e.school, degree: e.degree, field: e.field, location: e.location, start: d(e.start), end: d(e.end), details: e.details.filter(Boolean).map((t) => ({ id: '', text: t })) })),
+      experiences: x.experiences.map((e) => ({ id: '', company: e.company, title: e.title, location: e.location, start: d(e.start), end: d(e.end), dates: e.dates, contract: e.contract, summary: e.summary, bullets: e.bullets.filter(Boolean).map(toItem) })),
+      education: x.education.map((e) => ({ id: '', school: e.school, degree: e.degree, field: e.field, location: e.location, start: d(e.start), end: d(e.end), dates: e.dates, details: e.details.filter(Boolean).map(toItem) })),
       skills: x.skills.map((g) => ({ id: '', label: g.label, items: g.items.filter(Boolean) })),
       languages: x.languages.map((l) => ({ id: '', ...l })),
       certifications: x.certifications.map((c) => ({ id: '', ...c })),
-      extras: x.extras.map((g) => ({ id: '', title: g.title, items: g.items.filter(Boolean).map((t) => ({ id: '', text: t })) })),
+      extras: x.extras.map((g) => ({ id: '', title: g.title, items: g.items.filter(Boolean).map(toItem) })),
+      titles: Object.fromEntries(Object.entries(x.titles ?? {}).filter(([, v]) => v)),
     }),
   );
 }
+
+const fromItem = (b: { text: string; kind?: string }) => (b.kind === 'text' ? `¶ ${b.text}` : b.text);
 
 function toExtraction(cv: CvData): CvExtraction {
   return {
     language: cv.language,
     identity: { fullName: cv.identity.fullName, headline: cv.identity.headline, email: cv.identity.email, phone: cv.identity.phone, location: cv.identity.location, linkedin: cv.identity.linkedin, website: cv.identity.website },
     summary: cv.summary,
-    experiences: cv.experiences.map((e) => ({ company: e.company, title: e.title, location: e.location, start: e.start, end: e.end, contract: e.contract, summary: e.summary, bullets: e.bullets.map((b) => b.text) })),
-    education: cv.education.map((e) => ({ school: e.school, degree: e.degree, field: e.field, location: e.location, start: e.start, end: e.end, details: e.details.map((b) => b.text) })),
+    experiences: cv.experiences.map((e) => ({ company: e.company, title: e.title, location: e.location, start: e.start, end: e.end, dates: e.dates ?? '', contract: e.contract, summary: e.summary, bullets: e.bullets.map(fromItem) })),
+    education: cv.education.map((e) => ({ school: e.school, degree: e.degree, field: e.field, location: e.location, start: e.start, end: e.end, dates: e.dates ?? '', details: e.details.map(fromItem) })),
     skills: cv.skills.map((g) => ({ label: g.label, items: g.items })),
     languages: cv.languages.map((l) => ({ language: l.language, level: l.level, certification: l.certification })),
     certifications: cv.certifications.map((c) => ({ name: c.name, issuer: c.issuer, date: c.date })),
-    extras: cv.extras.map((g) => ({ title: g.title, items: g.items.map((b) => b.text) })),
+    extras: cv.extras.map((g) => ({ title: g.title, items: g.items.map(fromItem) })),
+    titles: { summary: cv.titles?.summary ?? '', experiences: cv.titles?.experiences ?? '', education: cv.titles?.education ?? '', skills: cv.titles?.skills ?? '', languages: cv.titles?.languages ?? '', certifications: cv.titles?.certifications ?? '' },
   };
 }
 
@@ -88,11 +105,11 @@ export interface GroundingWarning {
 
 /** Signale toute valeur dont les mots ne se retrouvent pas (assez) dans le texte source. */
 export function groundingWarnings(cv: CvData, sourceText: string, threshold = 0.75): GroundingWarning[] {
-  const source = new Set(tokens(sourceText));
+  const source = new Set(tokens(stripMarkup(sourceText)));
   const out: GroundingWarning[] = [];
   const check = (path: string, value: string) => {
     if (!value || value.length < 3) return;
-    const c = coverage(value, source);
+    const c = coverage(stripMarkup(value), source);
     if (c < threshold) out.push({ path, value, coverage: Math.round(c * 100) / 100 });
   };
   check('identity.fullName', cv.identity.fullName);

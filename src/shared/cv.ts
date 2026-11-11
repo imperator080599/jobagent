@@ -9,9 +9,15 @@ export const PartialDate = z
   .string()
   .regex(/^(\d{4}(-(0[1-9]|1[0-2]))?|present)$/, 'Format attendu : AAAA, AAAA-MM ou "present"');
 
+/**
+ * Élément de liste. Le texte peut porter une mise en valeur légère, reprise du
+ * document d'origine : **gras** et *italique*. `kind: 'text'` désigne un paragraphe
+ * simple (sans puce).
+ */
 export const Bullet = z.object({
   id: z.string(),
   text: z.string(),
+  kind: z.enum(['bullet', 'text']).optional(),
 });
 
 export const Experience = z.object({
@@ -21,6 +27,8 @@ export const Experience = z.object({
   location: z.string().optional().default(''),
   start: PartialDate.or(z.literal('')).optional().default(''),
   end: PartialDate.or(z.literal('')).optional().default(''),
+  /** Période telle qu'elle est écrite dans le document d'origine (« Sept 2023 – Current »). */
+  dates: z.string().optional().default(''),
   contract: z.string().optional().default(''),
   summary: z.string().optional().default(''),
   bullets: z.array(Bullet).default([]),
@@ -34,6 +42,7 @@ export const Education = z.object({
   location: z.string().optional().default(''),
   start: PartialDate.or(z.literal('')).optional().default(''),
   end: PartialDate.or(z.literal('')).optional().default(''),
+  dates: z.string().optional().default(''),
   details: z.array(Bullet).default([]),
 });
 
@@ -93,6 +102,8 @@ export const CvData = z.object({
   languages: z.array(LanguageItem).default([]),
   certifications: z.array(Certification).default([]),
   extras: z.array(ExtraSection).default([]),
+  /** Titres de rubriques tels qu'ils figurent dans le document d'origine (ex. « WORK & VOLUNTEERING EXPERIENCE »). */
+  titles: z.record(z.string(), z.string()).optional().default({}),
   /** Ordre d'affichage des sections (les sections vides sont ignorées au rendu). */
   sectionOrder: z
     .array(z.enum(['summary', 'experiences', 'education', 'skills', 'languages', 'certifications', 'extras']))
@@ -156,49 +167,82 @@ export function assignIds(cv: CvData): CvData {
   return out;
 }
 
-/** Texte brut du CV (pour les prompts, la recherche de mots-clés et les contrôles). */
+/** Retire la mise en valeur (**gras**, *italique*) d'un texte. */
+export function stripMarkup(text: string): string {
+  return text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?![*\w])/g, '$1$2');
+}
+
+export interface MarkupSpan {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+}
+
+/** Découpe un texte balisé en segments de mise en forme homogène. */
+export function parseMarkup(text: string): MarkupSpan[] {
+  const out: MarkupSpan[] = [];
+  const re = /\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|(?<![*\w])\*(?!\s)([^*\n]+?)\*(?![*\w])/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index), bold: false, italic: false });
+    if (m[1] !== undefined) out.push({ text: m[1], bold: true, italic: true });
+    else if (m[2] !== undefined) out.push({ text: m[2], bold: true, italic: false });
+    else out.push({ text: m[3]!, bold: false, italic: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), bold: false, italic: false });
+  return out.filter((s) => s.text.length > 0);
+}
+
+/** Texte brut du CV (pour les prompts, la recherche de mots-clés et les contrôles). La mise en valeur est retirée. */
 export function cvToText(cv: CvData): string {
+  return stripMarkup(cvToMarkedText(cv));
+}
+
+/** Texte du CV avec la mise en valeur d'origine (**gras**, *italique*). */
+export function cvToMarkedText(cv: CvData): string {
   const L: string[] = [];
   const id = cv.identity;
   if (id.fullName) L.push(id.fullName);
   if (id.headline) L.push(id.headline);
   const contact = [id.email, id.phone, id.location, id.linkedin, id.website, ...(id.extra ?? [])].filter(Boolean);
   if (contact.length) L.push(contact.join(' | '));
-  const period = (s?: string, e?: string) => [fmtDate(s), fmtDate(e)].filter(Boolean).join(' – ');
+  const period = (s?: string, e?: string, display?: string) => display || [fmtDate(s, cv.language), fmtDate(e, cv.language)].filter(Boolean).join(' – ');
   for (const section of cv.sectionOrder) {
-    if (section === 'summary' && cv.summary) L.push('', 'PROFIL', cv.summary);
+    if (section === 'summary' && cv.summary) L.push('', cv.titles?.summary || 'PROFIL', cv.summary);
     if (section === 'experiences' && cv.experiences.length) {
-      L.push('', 'EXPÉRIENCES PROFESSIONNELLES');
+      L.push('', cv.titles?.experiences || 'EXPÉRIENCES PROFESSIONNELLES');
       for (const e of cv.experiences) {
-        L.push(`${e.title} — ${e.company}${e.location ? ` (${e.location})` : ''}${period(e.start, e.end) ? ` | ${period(e.start, e.end)}` : ''}`);
+        L.push(`${e.title} — ${e.company}${e.location ? ` (${e.location})` : ''}${period(e.start, e.end, e.dates) ? ` | ${period(e.start, e.end, e.dates)}` : ''}`);
         if (e.summary) L.push(e.summary);
-        for (const b of e.bullets) L.push(`- ${b.text}`);
+        for (const b of e.bullets) L.push(b.kind === 'text' ? b.text : `- ${b.text}`);
       }
     }
     if (section === 'education' && cv.education.length) {
-      L.push('', 'FORMATION');
+      L.push('', cv.titles?.education || 'FORMATION');
       for (const e of cv.education) {
-        L.push(`${e.degree}${e.field ? `, ${e.field}` : ''} — ${e.school}${e.location ? ` (${e.location})` : ''}${period(e.start, e.end) ? ` | ${period(e.start, e.end)}` : ''}`);
-        for (const b of e.details) L.push(`- ${b.text}`);
+        L.push(`${e.degree}${e.field ? `, ${e.field}` : ''} — ${e.school}${e.location ? ` (${e.location})` : ''}${period(e.start, e.end, e.dates) ? ` | ${period(e.start, e.end, e.dates)}` : ''}`);
+        for (const b of e.details) L.push(b.kind === 'text' ? b.text : `- ${b.text}`);
       }
     }
     if (section === 'skills' && cv.skills.length) {
-      L.push('', 'COMPÉTENCES');
+      L.push('', cv.titles?.skills || 'COMPÉTENCES');
       for (const s of cv.skills) L.push(`${s.label ? `${s.label} : ` : ''}${s.items.join(', ')}`);
     }
     if (section === 'languages' && cv.languages.length) {
-      L.push('', 'LANGUES');
+      L.push('', cv.titles?.languages || 'LANGUES');
       for (const l of cv.languages) L.push(`${l.language}${l.level ? ` : ${l.level}` : ''}${l.certification ? ` (${l.certification})` : ''}`);
     }
     if (section === 'certifications' && cv.certifications.length) {
-      L.push('', 'CERTIFICATIONS');
+      L.push('', cv.titles?.certifications || 'CERTIFICATIONS');
       for (const c of cv.certifications) L.push(`${c.name}${c.issuer ? ` — ${c.issuer}` : ''}${c.date ? ` (${c.date})` : ''}`);
     }
     if (section === 'extras') {
       for (const x of cv.extras) {
         if (!x.items.length) continue;
         L.push('', x.title.toUpperCase());
-        for (const b of x.items) L.push(`- ${b.text}`);
+        for (const b of x.items) L.push(b.kind === 'text' ? b.text : `- ${b.text}`);
       }
     }
   }

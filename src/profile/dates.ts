@@ -62,11 +62,11 @@ function cleanRest(s: string): string {
 }
 
 /** Extrait la période d'une ligne ; renvoie aussi la ligne débarrassée de la période. */
-export function extractDateRange(line: string): { start: string; end: string; rest: string } | null {
+export function extractDateRange(line: string): { start: string; end: string; rest: string; raw: string } | null {
   let m = DATE_RANGE_RE.exec(line);
-  if (m) return { start: parsePartialDate(m[1]), end: parsePartialDate(m[2]), rest: cleanRest(line.slice(0, m.index) + ' ' + line.slice(m.index + m[0].length)) };
+  if (m) return { start: parsePartialDate(m[1]), end: parsePartialDate(m[2]), rest: cleanRest(line.slice(0, m.index) + ' ' + line.slice(m.index + m[0].length)), raw: m[0].trim() };
   m = SINCE_RE.exec(line);
-  if (m) return { start: parsePartialDate(m[1]), end: 'present', rest: cleanRest(line.slice(0, m.index) + ' ' + line.slice(m.index + m[0].length)) };
+  if (m) return { start: parsePartialDate(m[1]), end: 'present', rest: cleanRest(line.slice(0, m.index) + ' ' + line.slice(m.index + m[0].length)), raw: m[0].trim() };
   return null;
 }
 

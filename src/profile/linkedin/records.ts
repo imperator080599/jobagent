@@ -122,6 +122,7 @@ export function recordsToProfile(records: LinkedinRecords): CvData {
       location: g(r, 'Location'),
       start,
       end: finished ? parsePartialDate(finished) : start ? 'present' : '',
+      dates: '',
       contract: '',
       summary: '',
       bullets: descriptionToBullets(g(r, 'Description')).map((t) => ({ id: '', text: t })),
@@ -136,6 +137,7 @@ export function recordsToProfile(records: LinkedinRecords): CvData {
       location: '',
       start: parsePartialDate(g(r, 'Start Date')),
       end: parsePartialDate(g(r, 'End Date')),
+      dates: '',
       details: [g(r, 'Notes'), g(r, 'Activities')].filter(Boolean).map((t) => ({ id: '', text: t })),
     });
   }

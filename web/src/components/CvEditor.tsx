@@ -109,7 +109,7 @@ export function CvEditor({ value, onChange, warnings = [] }: { value: CvData; on
 
       <Section
         title="Expériences"
-        onAdd={() => set({ experiences: [...value.experiences, { id: '', company: '', title: '', location: '', start: '', end: '', contract: '', summary: '', bullets: [] }] })}
+        onAdd={() => set({ experiences: [...value.experiences, { id: '', company: '', title: '', location: '', start: '', end: '', dates: '', contract: '', summary: '', bullets: [] }] })}
         addLabel="Ajouter une expérience"
       >
         <div className="space-y-4">
@@ -136,7 +136,7 @@ export function CvEditor({ value, onChange, warnings = [] }: { value: CvData; on
         </div>
       </Section>
 
-      <Section title="Formation" onAdd={() => set({ education: [...value.education, { id: '', school: '', degree: '', field: '', location: '', start: '', end: '', details: [] }] })} addLabel="Ajouter une formation">
+      <Section title="Formation" onAdd={() => set({ education: [...value.education, { id: '', school: '', degree: '', field: '', location: '', start: '', end: '', dates: '', details: [] }] })} addLabel="Ajouter une formation">
         <div className="space-y-4">
           {value.education.map((e, i) => {
             const upd = (patch: Partial<typeof e>) => set({ education: value.education.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
