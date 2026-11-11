@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+data/
+.env
+.env.*
+!.env.example
+*.log
+.vercel/
+test-results/
+playwright-report/
+coverage/
+.DS_Store
+# Jamais de données personnelles dans le dépôt (CV, exports, sauvegardes)
+*.dump
+backups/
+private/
