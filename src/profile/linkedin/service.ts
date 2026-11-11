@@ -142,7 +142,7 @@ export async function importLinkedinFile(ctx: UserContext, file: { filename: str
   if (!kind) throw badRequest('Format non pris en charge. Importez l\'archive ZIP LinkedIn, le PDF de votre profil, ou collez son texte.');
   const doc = await extractDocumentText(file);
   if (doc.text.length < 80) throw badRequest('Aucun texte exploitable dans ce document.');
-  const structured = await structureCv(ctx, { text: doc.text, pdf: kind === 'pdf' ? file.data : undefined, kind: 'linkedin_profile' });
+  const structured = await structureCv(ctx, { text: doc.text, marked: doc.marked, pdf: kind === 'pdf' ? file.data : undefined, kind: 'linkedin_profile' });
   const fileId = kind === 'pdf' ? await saveFile(ctx.db, { userId: ctx.userId, kind: 'linkedin_profile', filename: file.filename, mime: 'application/pdf', data: file.data }) : undefined;
   return storeSnapshot(ctx, kind === 'pdf' ? 'profile_pdf' : 'paste', assignIds(structured.cv), fileId);
 }

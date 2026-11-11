@@ -167,6 +167,27 @@ export function assignIds(cv: CvData): CvData {
   return out;
 }
 
+/**
+ * Remet d'aplomb une mise en valeur balisée : fusionne les passages contigus de
+ * même nature (un passage en gras coupé par un retour à la ligne, par exemple) et
+ * retire toute balise orpheline, pour qu'aucun astérisque ne se retrouve dans un document.
+ */
+export function normalizeMarkup(text: string): string {
+  let out = text
+    .replace(/\*\*\*(\s*)\*\*\*/g, '$1')
+    .replace(/(?<!\*)\*\*(\s*)\*\*(?!\*)/g, '$1')
+    .replace(/(?<![*\w])\*(\s+)\*(?![*\s])/g, '$1');
+  // Balises orphelines : si une nature de balise est en nombre impair, elle est retirée entièrement.
+  for (const mark of ['***', '**']) {
+    const re = mark === '***' ? /\*\*\*/g : /(?<!\*)\*\*(?!\*)/g;
+    if ((out.match(re) ?? []).length % 2 === 1) out = out.replace(re, '');
+  }
+  const spans = parseMarkup(out);
+  // Astérisque isolé collé à un mot : reste d'une balise mal fermée.
+  if (spans.some((s) => /(^|\s)\*\S|\S\*(\s|$)/.test(s.text))) out = out.replace(/(?<!\*)\*(?!\*)/g, (m, off: number, str: string) => (/\d\s?$/.test(str.slice(0, off)) && /^\s?\d/.test(str.slice(off + 1)) ? m : ''));
+  return out;
+}
+
 /** Retire la mise en valeur (**gras**, *italique*) d'un texte. */
 export function stripMarkup(text: string): string {
   return text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?![*\w])/g, '$1$2');

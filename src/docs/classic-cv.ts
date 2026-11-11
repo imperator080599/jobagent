@@ -7,7 +7,7 @@
 // Une fois ce document créé, il est traité comme n'importe quel template Word :
 // les CV personnalisés sont des copies dont seuls les paragraphes utiles changent.
 import { AlignmentType, BorderStyle, Document, ExternalHyperlink, LineRuleType, Packer, Paragraph, TabStopType, TextRun } from 'docx';
-import { type Bullet, type CvData, fmtDate, parseMarkup } from '../shared/cv.js';
+import { type Bullet, type CvData, fmtDate, normalizeMarkup, parseMarkup } from '../shared/cv.js';
 
 export interface ClassicStyle {
   font: string;
@@ -23,6 +23,8 @@ export interface ClassicStyle {
   summaryIndent: number;
   /** Espace avant un titre de rubrique, en points. */
   sectionSpacing: number;
+  /** Position de la tabulation de droite (lieux et dates), en points depuis le bord gauche de la page. */
+  rightTab: number;
   linkColor: string;
 }
 
@@ -31,11 +33,12 @@ export const DEFAULT_CLASSIC_STYLE: ClassicStyle = {
   font: 'Calibri',
   size: 10,
   nameSize: 16,
-  margins: { top: 28, bottom: 34, left: 50, right: 42 },
+  margins: { top: 28, bottom: 30, left: 50, right: 36 },
   bulletIndent: 20,
   bulletHanging: 18,
-  summaryIndent: 20,
-  sectionSpacing: 12,
+  summaryIndent: 14,
+  sectionSpacing: 11,
+  rightTab: 546,
   linkColor: '0563C1',
 };
 
@@ -58,11 +61,11 @@ export async function buildClassicCv(cv: CvData, style: ClassicStyle = DEFAULT_C
   const titles = { ...(DEFAULT_TITLES[cv.language] ?? DEFAULT_TITLES.en!), ...cv.titles };
   const half = style.size * 2;
   const textWidth = 595.3 - style.margins.left - style.margins.right;
-  const rightTab = [{ type: TabStopType.RIGHT, position: tw(textWidth - 8) }];
+  const rightTab = [{ type: TabStopType.RIGHT, position: tw(Math.min(textWidth, style.rightTab - style.margins.left)) }];
   const line = { line: 240, lineRule: LineRuleType.AUTO, before: 0, after: 0 };
 
   const runs = (marked: string, base: { bold?: boolean; italics?: boolean } = {}) =>
-    parseMarkup(marked).map((s) => new TextRun({ text: s.text, font: style.font, size: half, bold: base.bold || s.bold || undefined, italics: base.italics || s.italic || undefined }));
+    parseMarkup(normalizeMarkup(marked)).map((s) => new TextRun({ text: s.text, font: style.font, size: half, bold: base.bold || s.bold || undefined, italics: base.italics || s.italic || undefined }));
   const plain = (text: string, o: { bold?: boolean; size?: number } = {}) => new TextRun({ text, font: style.font, size: (o.size ?? style.size) * 2, bold: o.bold || undefined });
   const period = (e: { start: string; end: string; dates?: string }) => e.dates || [fmtDate(e.start, cv.language), e.end === 'present' ? L.present : fmtDate(e.end, cv.language)].filter(Boolean).join(' – ');
 

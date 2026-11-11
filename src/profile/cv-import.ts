@@ -8,7 +8,7 @@ import type { UserContext } from '../core/context.js';
 import { coverage, detectLanguage, tokens } from '../core/text.js';
 import { getLlm, llmAvailability } from '../llm/index.js';
 import { registerMock } from '../llm/mock.js';
-import { type CvData, CvData as CvDataSchema, assignIds, stripMarkup } from '../shared/cv.js';
+import { type CvData, CvData as CvDataSchema, assignIds, normalizeMarkup, stripMarkup } from '../shared/cv.js';
 import { parseCvHeuristic } from './cv-parse.js';
 import { parsePartialDate } from './dates.js';
 
@@ -51,25 +51,32 @@ Règles :
 - Dates : "AAAA-MM" quand le mois est indiqué, "AAAA" sinon, "present" pour un poste en cours.
 - Compétences : garde les regroupements du document (libellé + éléments). Sans regroupement, un seul groupe au libellé vide.
 - Respecte le découpage en rubriques du document. Seules les rubriques consacrées aux compétences, aux langues ou aux certifications alimentent "skills", "languages" et "certifications". Toute autre rubrique (centres d'intérêt, engagements, projets, ou une rubrique mixte du type « Compétences et activités ») va dans "extras" avec son titre d'origine et ses éléments tels quels.
-- Mise en valeur : quand une partie seulement d'un élément est en gras ou en italique dans le document, encadre-la par **gras** ou *italique*. N'utilise aucune balise si l'élément entier a la même mise en forme.
+- Mise en valeur : le texte fourni signale par **gras** et *italique* les passages mis en valeur dans le document. Conserve ces balises à l'identique dans les éléments de liste et les rubriques libres, y compris quand un élément entier est balisé ; quand un passage balisé se poursuit sur la ligne suivante, garde une seule paire de balises autour du passage complet. N'en mets jamais dans les champs d'identification (nom, entreprise, intitulé, lieu, école, diplôme, dates, titres de rubriques).
 - Un élément de liste qui est un paragraphe simple (sans puce) dans le document commence par le caractère ¶.
 - "dates" reprend la période exactement telle qu'elle est écrite ; "titles" reprend les titres de rubriques exactement tels qu'ils sont écrits.`;
 
 /** Un élément préfixé par « ¶ » est un paragraphe simple (sans puce) dans le document d'origine. */
 function toItem(text: string): { id: string; text: string; kind?: 'text' } {
   const t = text.trim();
-  return t.startsWith('¶') ? { id: '', text: t.replace(/^¶\s*/, ''), kind: 'text' } : { id: '', text: t };
+  return t.startsWith('¶') ? { id: '', text: unwrap(t.replace(/^¶\s*/, '')), kind: 'text' } : { id: '', text: unwrap(t) };
 }
+
+/** Les champs d'identification (entreprise, intitulé, école…) sont toujours du texte simple. */
+const plainField = (v: string) => stripMarkup(v).replace(/\*+/g, '').trim();
+/** Un élément entièrement en gras ou en italique ne porte aucune balise : sa mise en forme vient du template. */
+const unwrap = (v: string) => normalizeMarkup(v.trim());
+/** L'accroche est un paragraphe à la mise en forme uniforme : elle vient du template, pas de balises. */
+const unwrapWhole = (v: string) => unwrap(v).replace(/^(\*{1,3})([^*]+)\1$/, '$2');
 
 function toCvData(x: CvExtraction): CvData {
   const d = (v: string) => (v === 'present' ? 'present' : parsePartialDate(v));
   return assignIds(
     CvDataSchema.parse({
       language: (x.language || 'fr').slice(0, 2).toLowerCase(),
-      identity: { ...x.identity, extra: [] },
-      summary: x.summary,
-      experiences: x.experiences.map((e) => ({ id: '', company: e.company, title: e.title, location: e.location, start: d(e.start), end: d(e.end), dates: e.dates, contract: e.contract, summary: e.summary, bullets: e.bullets.filter(Boolean).map(toItem) })),
-      education: x.education.map((e) => ({ id: '', school: e.school, degree: e.degree, field: e.field, location: e.location, start: d(e.start), end: d(e.end), dates: e.dates, details: e.details.filter(Boolean).map(toItem) })),
+      identity: { ...Object.fromEntries(Object.entries(x.identity).map(([k, v]) => [k, plainField(v)])), extra: [] },
+      summary: unwrapWhole(x.summary),
+      experiences: x.experiences.map((e) => ({ id: '', company: plainField(e.company), title: plainField(e.title), location: plainField(e.location), start: d(plainField(e.start)), end: d(plainField(e.end)), dates: plainField(e.dates), contract: e.contract, summary: e.summary, bullets: e.bullets.filter(Boolean).map(toItem) })),
+      education: x.education.map((e) => ({ id: '', school: plainField(e.school), degree: plainField(e.degree), field: plainField(e.field), location: plainField(e.location), start: d(plainField(e.start)), end: d(plainField(e.end)), dates: plainField(e.dates), details: e.details.filter(Boolean).map(toItem) })),
       skills: x.skills.map((g) => ({ id: '', label: g.label, items: g.items.filter(Boolean) })),
       languages: x.languages.map((l) => ({ id: '', ...l })),
       certifications: x.certifications.map((c) => ({ id: '', ...c })),
@@ -139,7 +146,7 @@ export interface StructureResult {
   warnings: GroundingWarning[];
 }
 
-export async function structureCv(ctx: UserContext, input: { text: string; pdf?: Uint8Array; kind?: 'cv' | 'linkedin_profile' }): Promise<StructureResult> {
+export async function structureCv(ctx: UserContext, input: { text: string; marked?: string; pdf?: Uint8Array; kind?: 'cv' | 'linkedin_profile' }): Promise<StructureResult> {
   const availability = await llmAvailability(ctx);
   if (!availability.available) {
     const cv = parseCvHeuristic(input.text, detectLanguage(input.text) || 'fr');
@@ -153,7 +160,7 @@ export async function structureCv(ctx: UserContext, input: { text: string; pdf?:
     effort: 'low',
     system: CV_STRUCTURE_SYSTEM,
     documents: input.pdf ? [{ mediaType: 'application/pdf', data: input.pdf }] : undefined,
-    prompt: `Voici ${what}. ${input.pdf ? 'Le document original est joint ; le texte extrait ci-dessous sert de contrôle.' : ''}\n\n<cv_texte>\n${input.text}\n</cv_texte>\n\nTranscris-le intégralement dans la structure demandée.`,
+    prompt: `Voici ${what}. ${input.pdf ? 'Le document original est joint ; le texte extrait ci-dessous sert de contrôle.' : ''}\n\n<cv_texte>\n${input.marked ?? input.text}\n</cv_texte>\n\nTranscris-le intégralement dans la structure demandée.`,
     schema: CvExtraction,
     maxTokens: 16_000,
   });
@@ -168,6 +175,7 @@ export async function structureCv(ctx: UserContext, input: { text: string; pdf?:
 // Simulation (tests, démonstration) : l'analyse par règles tient lieu de modèle.
 registerMock('cv.structure', (req) => {
   const m = /<cv_texte>\n([\s\S]*?)\n<\/cv_texte>/.exec(req.prompt);
-  const text = m?.[1] ?? '';
+  // L'analyse par règles travaille sur le texte simple : la mise en valeur est retirée.
+  const text = stripMarkup(m?.[1] ?? '');
   return toExtraction(parseCvHeuristic(text, detectLanguage(text) || 'fr'));
 });

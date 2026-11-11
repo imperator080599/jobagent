@@ -3,7 +3,7 @@
 // paragraphes à modifier sont réécrits. Tout le reste (styles, marges, polices,
 // tabulations, bordures, en-têtes, images) reste identique à l'octet près.
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { type MarkupSpan, parseMarkup } from '../shared/cv.js';
+import { type MarkupSpan, normalizeMarkup, parseMarkup } from '../shared/cv.js';
 
 export interface DocxPackage {
   files: Record<string, Uint8Array>;
@@ -218,7 +218,7 @@ export function rewriteParagraph(base: DocxParagraph, marked: string, opts: { ke
       body = base.runs.slice(k);
     } else marked = base.text.slice(0, opts.keepPrefix) + marked;
   }
-  const spans: MarkupSpan[] = parseMarkup(marked);
+  const spans: MarkupSpan[] = parseMarkup(normalizeMarkup(marked));
   // Pour chaque nature de segment (normal, gras, italique), le segment d'origine le plus long sert de modèle.
   const weight = new Map<string, { chars: number; best: number; rPr: string }>();
   for (const r of body.length ? body : base.runs) {

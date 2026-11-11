@@ -155,6 +155,9 @@ export async function checkRenderedDocument(input: QaInput): Promise<DocQaResult
   const leftover = /\[[^[\]]{2,60}\]|\{\{[^}]+\}\}|\bundefined\b|\bNaN\b|\[object Object\]/.exec(m.text);
   add('placeholders', !leftover, 'error', leftover ? `Zone de modèle non remplie : « ${leftover[0]} ».` : 'Aucune zone de modèle laissée vide.');
 
+  const stars = /\S\*{1,3}(\s|$)|(^|\s)\*{1,3}\S/.test(m.text);
+  add('markup', !stars, 'error', stars ? 'Des astérisques de mise en forme apparaissent dans le document.' : 'Aucune balise de mise en forme résiduelle.');
+
   if (input.page) {
     const tol = 3;
     const out: string[] = [];

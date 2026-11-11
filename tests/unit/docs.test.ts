@@ -294,3 +294,29 @@ describe('rendu PDF et contrôle qualité', () => {
     expect(unexpectedFonts(['DejaVuSans', 'Carlito'], ['Calibri'])).toEqual(['DejaVuSans']);
   });
 });
+
+describe('mise en valeur balisée', () => {
+  it('fusionne les passages contigus et retire les balises orphelines', async () => {
+    const { normalizeMarkup } = await import('../../src/shared/cv.js');
+    expect(normalizeMarkup('***a highly selective*** ***two-year program***')).toBe('***a highly selective two-year program***');
+    expect(normalizeMarkup('**Revue** **des comptes** annuels')).toBe('**Revue des comptes** annuels');
+    expect(normalizeMarkup('**Titre:** *a highly selective post-*secondary program')).toBe('**Titre:** a highly selective post-secondary program');
+    expect(normalizeMarkup('**Audit des comptes')).toBe('Audit des comptes');
+    // Un astérisque arithmétique n'est pas une balise.
+    expect(normalizeMarkup('Marge de 3 * 4 points')).toBe('Marge de 3 * 4 points');
+    expect(normalizeMarkup('**Identified** two overstatements')).toBe('**Identified** two overstatements');
+  });
+
+  it('balise le gras partiel d’une ligne de PDF et restitue les espaces exacts', async () => {
+    const { pageToText } = await import('../../src/profile/extract.js');
+    const it = (str: string, x: number, width: number, bold = false) => ({ str, x, y: 700, width, fontSize: 10, bold });
+    // Fragments tels qu'un PDF Word les expose : espaces explicites, tabulation rendue par un large blanc.
+    const line = [it('•', 52, 4), it(' ', 56, 14), it('Identified', 70, 44, true), it(' ', 114, 1.8), it('two', 116, 14), it(' ', 130, 1.7), it('overstatements', 131.7, 60)];
+    expect(pageToText(line, { markup: true })).toBe('• **Identified** two overstatements');
+    expect(pageToText(line)).toBe('• Identified two overstatements');
+    const header = [it('Deloitte France', 50, 70, true), it(' ', 120, 350), it('Paris,', 470, 26), it(' ', 496, 1.7), it('France', 497.7, 30)];
+    expect(pageToText(header, { markup: true })).toBe('**Deloitte France**    Paris, France');
+    // Ligne entièrement en gras : aucune balise (la mise en forme est celle du paragraphe).
+    expect(pageToText([it('EDUCATION', 277, 50, true)], { markup: true })).toBe('EDUCATION');
+  });
+});

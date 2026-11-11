@@ -102,7 +102,7 @@ export async function importCv(ctx: UserContext, file: { filename: string; mime:
   if (file.data.byteLength > MAX_UPLOAD_BYTES) throw badRequest('Fichier trop volumineux (8 Mo maximum).');
   const doc = await extractDocumentText(file);
   if (doc.text.length < 80) throw badRequest(doc.warnings[0] ?? 'Aucun texte exploitable dans ce document.');
-  const structured = await structureCv(ctx, { text: doc.text, pdf: doc.kind === 'pdf' ? file.data : undefined });
+  const structured = await structureCv(ctx, { text: doc.text, marked: doc.marked, pdf: doc.kind === 'pdf' ? file.data : undefined });
   const language = structured.cv.language || detectLanguage(doc.text) || 'fr';
   const data = assignIds({ ...structured.cv, language });
   const fileId = await saveFile(ctx.db, { userId: ctx.userId, kind: 'cv_source', filename: file.filename, mime: file.mime || 'application/octet-stream', data: file.data });
