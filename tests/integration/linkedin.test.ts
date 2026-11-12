@@ -59,7 +59,7 @@ describe('lecture des données LinkedIn', () => {
 
   it('rapproche les noms d’entreprise malgré les variantes', () => {
     expect(sameCompany('Hartwell & Associés', 'Hartwell et Associés SAS')).toBe(true);
-    expect(sameCompany('Deloitte', 'Deloitte France')).toBe(true);
+    expect(sameCompany('Mazars', 'Mazars France')).toBe(true);
     expect(sameCompany('Belmont Audit', 'Cabinet Valmont')).toBe(false);
   });
 });

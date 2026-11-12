@@ -314,8 +314,8 @@ describe('mise en valeur balisée', () => {
     const line = [it('•', 52, 4), it(' ', 56, 14), it('Identified', 70, 44, true), it(' ', 114, 1.8), it('two', 116, 14), it(' ', 130, 1.7), it('overstatements', 131.7, 60)];
     expect(pageToText(line, { markup: true })).toBe('• **Identified** two overstatements');
     expect(pageToText(line)).toBe('• Identified two overstatements');
-    const header = [it('Deloitte France', 50, 70, true), it(' ', 120, 350), it('Paris,', 470, 26), it(' ', 496, 1.7), it('France', 497.7, 30)];
-    expect(pageToText(header, { markup: true })).toBe('**Deloitte France**    Paris, France');
+    const header = [it('Mazars France', 50, 70, true), it(' ', 120, 350), it('Paris,', 470, 26), it(' ', 496, 1.7), it('France', 497.7, 30)];
+    expect(pageToText(header, { markup: true })).toBe('**Mazars France**    Paris, France');
     // Ligne entièrement en gras : aucune balise (la mise en forme est celle du paragraphe).
     expect(pageToText([it('EDUCATION', 277, 50, true)], { markup: true })).toBe('EDUCATION');
   });

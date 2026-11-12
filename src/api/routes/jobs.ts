@@ -11,6 +11,7 @@ import { checkExistingJob, ingestJob, manualSource, mergeJobs, normalizeJob, typ
 import { fetchJobPage } from '../../search/page.js';
 import { isSubmitted, STAGE_GROUPS, STAGES, type Stage } from '../../shared/stages.js';
 import { getJob, listStageHistory, setStage } from '../../tracker/stage.js';
+import { recordFeedback, submitReview } from '../../pipeline/review.js';
 import { type AppDeps, body, router } from '../http.js';
 import { requireScope, sessionOnly } from '../middleware.js';
 
@@ -164,7 +165,7 @@ export function jobsRoutes(deps: AppDeps) {
     }
     const res = await ingestJob(uctx, raw, { source: await manualSource(uctx), actor: 'user' });
     if (res.outcome === 'created') {
-      await enqueue(ctx.db, { type: 'job.qualify', userId: uctx.userId, payload: { jobId: res.job.id, manual: true }, idempotencyKey: `job.qualify:${res.job.id}`, priority: 80 });
+      await enqueue(ctx.db, { type: 'job.qualify', userId: uctx.userId, payload: { jobId: res.job.id, manual: true }, idempotencyKey: `job.qualify:${res.job.id}`, priority: 80, runAfter: ctx.now() });
       deps.kick(c);
     }
     return c.json({ outcome: res.outcome === 'created' ? 'created' : 'duplicate', job: res.job, verdict: publicVerdict(res.verdict), method, notes }, res.outcome === 'created' ? 201 : 200);
@@ -273,6 +274,50 @@ export function jobsRoutes(deps: AppDeps) {
     const flags = { ...job.flags };
     delete (flags as Record<string, unknown>).possibleDuplicates;
     const [updated] = await ctx.db.update(jobs).set({ flags, updatedAt: ctx.now() }).where(eq(jobs.id, job.id)).returning();
+    return c.json({ job: updated });
+  });
+
+  /** Décision et précisions de l'utilisateur après l'analyse (boucle de feedback). */
+  r.post('/:id/review', sessionOnly, async (c) => {
+    const input = await body(
+      c,
+      z.object({
+        decision: z.enum(['pursue', 'reject', 'reanalyze', 'later']),
+        skills: z.array(z.object({ name: z.string().trim().min(1).max(80), has: z.boolean(), level: z.string().max(80).optional(), context: z.string().max(600).optional() })).max(40).optional(),
+        note: z.string().max(2000).optional(),
+        noteScope: z.enum(['application', 'profile', 'style']).optional(),
+        reason: z.string().max(500).optional(),
+      }),
+    );
+    const job = await submitReview(c.get('uctx'), c.req.param('id'), input);
+    deps.kick(c);
+    return c.json({ job });
+  });
+
+  /** Lance (ou relance) l'analyse d'une offre, par exemple après l'avoir rétablie ou corrigée. */
+  r.post('/:id/analyze', sessionOnly, async (c) => {
+    const uctx = c.get('uctx');
+    const job = await getJob(uctx, c.req.param('id'));
+    if (isSubmitted(job.stage)) throw conflict('Une candidature est déjà partie pour cette offre.');
+    if (['cv_in_progress', 'letter_in_progress', 'ready_to_apply', 'applying'].includes(job.stage)) throw conflict('Les documents de cette candidature sont déjà en préparation.');
+    if (job.stage !== 'to_analyze') await setStage(uctx, job.id, 'to_analyze', { actor: 'user', reason: 'analyse demandée' });
+    await enqueue(ctx.db, { type: job.qualifiedAt ? 'job.ats' : 'job.qualify', userId: uctx.userId, payload: { jobId: job.id, manual: true, force: true }, idempotencyKey: `${job.qualifiedAt ? 'job.ats' : 'job.qualify'}:${job.id}`, priority: 90, runAfter: ctx.now() });
+    deps.kick(c);
+    return c.json({ job: await getJob(uctx, job.id) });
+  });
+
+  /** Demande une nouvelle version du CV ou de la lettre, avec une consigne. La version précédente est conservée. */
+  r.post('/:id/revise', sessionOnly, async (c) => {
+    const uctx = c.get('uctx');
+    const input = await body(c, z.object({ target: z.enum(['cv', 'letter']), instructions: z.string().trim().min(3).max(2000), scope: z.enum(['application', 'profile', 'style']).default('application') }));
+    const job = await getJob(uctx, c.req.param('id'));
+    if (!['letter_in_progress', 'ready_to_apply', 'cv_in_progress'].includes(job.stage)) throw conflict("Cette candidature n'est pas en cours de préparation.");
+    await recordFeedback(uctx, job, { note: input.instructions, noteScope: input.scope });
+    const to = input.target === 'cv' ? 'cv_in_progress' : 'letter_in_progress';
+    const updated = await setStage(uctx, job.id, to, { actor: 'user', reason: `nouvelle version demandée : ${input.instructions.slice(0, 120)}` });
+    const type = input.target === 'cv' ? 'job.tailor' : 'job.letter';
+    await enqueue(ctx.db, { type, userId: uctx.userId, payload: { jobId: job.id }, idempotencyKey: `${type}:${job.id}`, priority: 88, runAfter: ctx.now() });
+    deps.kick(c);
     return c.json({ job: updated });
   });
 

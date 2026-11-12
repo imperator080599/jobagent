@@ -65,7 +65,8 @@ function unwrap(lines: string[]): string[] {
       inBody && !heading && prev !== undefined && prev.trim() !== '' && line.trim() !== '' && !BULLET_RE.test(line) && !isHeading(prev) && !/[.!?:;]$/.test(prev.trim()) && !extractDateRange(line);
     const wrapped = width > 40 && prevPhysical >= width * 0.86;
     const lowercaseStart = /^\s*[a-zà-ÿ(0-9%€$]/.test(line) && (BULLET_RE.test(prev ?? '') || prevPhysical > 60);
-    if (eligible && (wrapped || lowercaseStart)) out[out.length - 1] = `${prev} ${line.trim()}`;
+    // Mot composé coupé sur son trait d'union (« fusions-\nacquisitions ») : recollé sans espace.
+    if (eligible && (wrapped || lowercaseStart)) out[out.length - 1] = /\p{L}-$/u.test(prev!) && /^\s*\p{Ll}/u.test(line) ? `${prev}${line.trim()}` : `${prev} ${line.trim()}`;
     else out.push(line);
     prevPhysical = line.length;
   }

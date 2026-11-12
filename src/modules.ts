@@ -10,6 +10,7 @@ import { documentsRoutes } from './api/routes/documents.js';
 import { jobsRoutes } from './api/routes/jobs.js';
 import './docs/index.js';
 import './profile/index.js';
+import './pipeline/index.js';
 
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/profile', profileRoutes(deps)));

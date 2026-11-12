@@ -10,6 +10,7 @@ import { logActivity } from '../core/activity.js';
 import { badRequest, notFound } from '../core/errors.js';
 import { getFile, saveFile } from '../core/files.js';
 import { raiseAction, resolveAction } from '../core/inbox.js';
+import { unblockByReason } from '../core/queue.js';
 import type { CvVersion } from '../profile/cv.js';
 import { buildClassicCv } from './classic-cv.js';
 import { docxToPdf, documentCapabilities, pdfToPng, toDocx } from './convert.js';
@@ -124,6 +125,9 @@ export async function importLetterTemplate(ctx: UserContext, file: { filename: s
   if (profile.vendorFooters.length) notes.push('Le pied de page du fournisseur du modèle (mention publicitaire ou copyright) est retiré des lettres générées.');
   const t = await store(ctx, { kind: 'letter', name: file.filename, language: profile.language, origin: 'upload', source: file, docx, profile, notes });
   await logActivity(ctx.db, { userId: ctx.userId, actor: 'user', action: 'template.imported', entityType: 'template', entityId: t.id, summary: `Template de lettre importé : ${file.filename} (version ${t.version})` });
+  // Les candidatures qui attendaient un modèle de lettre reprennent.
+  await resolveAction(ctx.db, ctx.userId, { dedupKey: 'setup.letter_template' }, { templateId: t.id });
+  await unblockByReason(ctx.db, ctx.userId, ['letter_template_missing']);
   return t;
 }
 

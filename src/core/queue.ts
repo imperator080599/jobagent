@@ -92,7 +92,7 @@ export async function blockTask(db: Db, id: string, reason: string): Promise<voi
 export async function unblockTasks(db: Db, idempotencyKey: string): Promise<number> {
   const rows = await db
     .update(tasks)
-    .set({ status: 'queued', runAfter: new Date(), lastError: '' })
+    .set({ status: 'queued', lastError: '' })
     .where(and(eq(tasks.idempotencyKey, idempotencyKey), eq(tasks.status, 'blocked')))
     .returning({ id: tasks.id });
   return rows.length;
@@ -104,7 +104,7 @@ export async function unblockByReason(db: Db, userId: string, reasons: string[])
   const match = sql.join(reasons.map((r) => sql`${tasks.lastError} like ${`[${r}]%`}`), sql` or `);
   const rows = await db
     .update(tasks)
-    .set({ status: 'queued', runAfter: new Date(), lastError: '' })
+    .set({ status: 'queued', lastError: '' })
     .where(and(eq(tasks.userId, userId), eq(tasks.status, 'blocked'), sql`(${match})`))
     .returning({ id: tasks.id });
   return rows.length;

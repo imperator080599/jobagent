@@ -17,7 +17,7 @@ import { costUsd, type Usage } from './pricing.js';
 import type { Llm, LlmJsonRequest, LlmProvider, LlmRequest } from './types.js';
 
 export * from './types.js';
-export { UNTRUSTED_RULE, detectInjection, wrapUntrusted } from './safety.js';
+export { UNTRUSTED_RULE, detectInjection, wrapUntrusted, type InjectionFinding } from './safety.js';
 
 export async function llmSpend(ctx: UserContext): Promise<{ todayUsd: number; monthUsd: number }> {
   const now = ctx.now();
