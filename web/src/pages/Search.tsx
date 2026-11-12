@@ -346,10 +346,13 @@ function SourcesTab() {
                       <span className="text-sm font-semibold text-slate-900">{s.name}</span>
                       <Badge>{s.label}</Badge>
                       <Badge tone={s.enabled ? h.tone : 'neutral'}>{s.enabled ? h.label : 'En pause'}</Badge>
+                      {r && r.status === 'failed' && s.health !== 'failing' && s.health !== 'needs_config' && <Badge tone="warning">Dernière lecture en échec</Badge>}
                       {r && r.status === 'partial' && <Badge tone="warning" title={r.incompleteReason}>Lecture partielle</Badge>}
                       {r && r.status === 'complete' && <Badge tone="success">Lecture complète</Badge>}
                     </div>
-                    {r ? (
+                    {r && r.status === 'running' ? (
+                      <p className="mt-1 text-[12.5px] font-medium text-indigo-700">Lecture en cours…</p>
+                    ) : r ? (
                       <p className="mt-1 text-[12.5px] text-slate-600">
                         {r.itemsSeen} offre(s) lue(s) · {r.itemsRelevant} pertinente(s) · {r.itemsNew} nouvelle(s){r.itemsExpired ? ` · ${r.itemsExpired} retirée(s)` : ''} — {relativeTime(r.startedAt)}
                         {r.status === 'partial' && r.incompleteReason && <span className="text-amber-700"> · {r.incompleteReason}</span>}
