@@ -45,6 +45,9 @@ export function settingsRoutes(deps: AppDeps) {
     if (key === 'anthropic_api_key') {
       await resolveAction(ctx.db, c.get('user').id, { dedupKey: 'setup.llm_key' }, { configured: true });
       await unblockByReason(ctx.db, c.get('user').id, ['llm_key_missing', 'llm_key_invalid']);
+    } else {
+      // Identifiants d'une source : les collectes en attente reprennent.
+      await unblockByReason(ctx.db, c.get('user').id, ['source_credentials']);
     }
     deps.kick(c);
     return c.json({ ok: true });
