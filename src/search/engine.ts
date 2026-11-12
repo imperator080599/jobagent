@@ -127,6 +127,8 @@ export async function runSource(ctx: UserContext, sourceId: string, opts: { trig
       secrets,
       maxRequests: opts.maxRequests ?? 60,
       emit: async (raw) => {
+        // Une même offre peut remonter par plusieurs requêtes d'une même collecte : elle n'est comptée et traitée qu'une fois.
+        if (raw.externalId && seen.has(raw.externalId)) return Date.now() - started < budgetMs;
         counters.seen++;
         if (raw.externalId) seen.add(raw.externalId);
         if (!raw.title?.trim()) return true;

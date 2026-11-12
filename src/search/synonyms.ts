@@ -80,13 +80,23 @@ export function searchTerms(titles: string[], extraGroups: string[][] = [], limi
   return out.slice(0, limit);
 }
 
+/**
+ * Mots significatifs d'un intitulé, pour la comparaison : les sigles à esperluette
+ * sont conservés (« M&A », « FP&A », « P&L ») et les terminaisons qui ne changent pas
+ * le sens sont neutralisées (« analyste » = « analyst », « services » = « service »).
+ */
+export function titleTokens(title: string): string[] {
+  const kept = title.replace(/(^|[^\p{L}])(\p{L}{1,2})\s*&\s*(\p{L}{1,2})(?=[^\p{L}]|$)/gu, '$1$2and$3');
+  return tokens(kept).map((t) => (t.length > 4 ? t.replace(/(es|e|s)$/, '') : t));
+}
+
 /** Proximité d'un intitulé d'offre avec un ensemble d'intitulés visés (0..1), synonymes compris. */
 export function titleAffinity(jobTitle: string, targets: string[]): number {
-  const jt = new Set(tokens(jobTitle));
+  const jt = new Set(titleTokens(jobTitle));
   if (!jt.size) return 0;
   let best = 0;
   for (const target of targets) {
-    const tt = tokens(target);
+    const tt = titleTokens(target);
     if (!tt.length) continue;
     const hit = tt.filter((x) => jt.has(x)).length;
     // Tous les mots de l'intitulé visé sont dans l'offre → correspondance forte, quel que soit le reste de l'intitulé.
