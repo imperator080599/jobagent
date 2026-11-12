@@ -245,6 +245,8 @@ export interface IngestOptions {
   source: Source;
   runId?: string;
   actor?: string;
+  /** Marques posées à la création de la fiche (ex. texte partiel fourni par un agrégateur). */
+  flags?: Record<string, unknown>;
 }
 
 export interface IngestResult {
@@ -324,6 +326,11 @@ export async function ingestJob(ctx: UserContext, raw: RawJob, o: IngestOptions)
       if (companyId) patch.companyId = companyId;
     }
     if (contentChanged) patch.flags = { ...cur.flags, contentChangedAt: now.toISOString() };
+    if ((cur.flags as Record<string, unknown>).partialDescription && patch.descriptionText && !o.flags?.partialDescription) {
+      const flags = { ...(patch.flags ?? cur.flags) } as Record<string, unknown>;
+      delete flags.partialDescription;
+      patch.flags = flags;
+    }
     // Une offre revue en ligne n'est plus expirée.
     if (cur.expiredAt) patch.expiredAt = null;
     await recordSighting(ctx, cur, n, raw, o);
@@ -348,7 +355,7 @@ export async function ingestJob(ctx: UserContext, raw: RawJob, o: IngestOptions)
       companyId: await findCompanyId(ctx, n.companyNorm),
       stage: 'new',
       stageChangedAt: now,
-      flags: found.possible.length ? { possibleDuplicates: found.possible.map((p) => ({ id: p.job.id, similarity: p.similarity, reason: p.reason })) } : {},
+      flags: { ...(o.flags ?? {}), ...(found.possible.length ? { possibleDuplicates: found.possible.map((p) => ({ id: p.job.id, similarity: p.similarity, reason: p.reason })) } : {}) },
       firstSeenAt: now,
       lastSeenAt: now,
       createdAt: now,

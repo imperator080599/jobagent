@@ -9,9 +9,11 @@ import { linkedinRoutes } from './api/routes/linkedin.js';
 import { documentsRoutes } from './api/routes/documents.js';
 import { jobsRoutes } from './api/routes/jobs.js';
 import { applicationsRoutes } from './api/routes/applications.js';
+import { searchRoutes } from './api/routes/search.js';
 import './docs/index.js';
 import './profile/index.js';
 import './pipeline/index.js';
+import './search/index.js';
 
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/profile', profileRoutes(deps)));
@@ -22,3 +24,4 @@ registerRoutes('private', (app, deps) => app.route('/profile/linkedin', linkedin
 registerRoutes('private', (app, deps) => app.route('/documents', documentsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/jobs', jobsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/applications', applicationsRoutes(deps)));
+registerRoutes('private', (app, deps) => app.route('/search', searchRoutes(deps)));

@@ -3,7 +3,8 @@ import { and, asc, desc, eq, gte, ilike, inArray, or, sql, type SQL } from 'driz
 import { z } from 'zod';
 import { logActivity } from '../../core/activity.js';
 import { badRequest, conflict, HttpError } from '../../core/errors.js';
-import { enqueue } from '../../core/queue.js';
+import { resolveAction } from '../../core/inbox.js';
+import { enqueue, unblockTasks } from '../../core/queue.js';
 import { actionItems, applications, atsAnalyses, cvVersions, jobSightings, jobs, letters, sources } from '../../db/schema.js';
 import { extractJobFields } from '../../search/extract.js';
 import { FetchError } from '../../search/http.js';
@@ -246,6 +247,15 @@ export function jobsRoutes(deps: AppDeps) {
         descriptionHash: n.descriptionHash,
         fingerprint: n.fingerprint,
       });
+    }
+    if (input.descriptionText !== undefined && (job.flags as Record<string, unknown>).partialDescription) {
+      // L'utilisateur a fourni le texte complet : l'analyse en attente peut reprendre.
+      const flags = { ...job.flags } as Record<string, unknown>;
+      delete flags.partialDescription;
+      patch.flags = flags;
+      await resolveAction(ctx.db, uctx.userId, { dedupKey: `job.needs_text:${job.id}` }, { provided: true });
+      await unblockTasks(ctx.db, `job.ats:${job.id}`);
+      deps.kick(c);
     }
     const [updated] = await ctx.db.update(jobs).set(patch).where(eq(jobs.id, job.id)).returning();
     if (contentEdit) await logActivity(ctx.db, { userId: uctx.userId, actor: 'user', action: 'job.edited', summary: `${updated!.companyName} — ${updated!.title}`, entityType: 'job', entityId: job.id });

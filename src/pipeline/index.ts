@@ -3,12 +3,16 @@
 // statut de l'offre avant d'agir : rejouée ou exécutée en double, elle ne fait rien.
 import { and, desc, eq } from 'drizzle-orm';
 import type { UserContext } from '../core/context.js';
-import { ConfigError } from '../core/errors.js';
+import { ConfigError, NeedsHumanError } from '../core/errors.js';
 import { raiseAction, resolveActionsFor } from '../core/inbox.js';
 import { enqueue } from '../core/queue.js';
-import { cvVersions, letters } from '../db/schema.js';
+import { cvVersions, jobs, letters } from '../db/schema.js';
+import { FetchError } from '../search/http.js';
+import { descriptionHash } from '../search/normalize.js';
+import { fetchJobPage } from '../search/page.js';
+import { htmlToText } from '../search/normalize.js';
 import { isSubmitted } from '../shared/stages.js';
-import { getJob, setStage } from '../tracker/stage.js';
+import { getJob, setStage, type Job } from '../tracker/stage.js';
 import { tailorCv } from '../writer/tailor.js';
 import { writeLetter } from '../writer/letter.js';
 import { latestAnalysis, runAtsAnalysis, type AtsParsed } from './ats.js';
@@ -42,13 +46,41 @@ registerTaskHandler('job.qualify', async (ctx, task) => {
   }
 });
 
+/**
+ * Certaines sources ne fournissent qu'un extrait de l'annonce. Une analyse ATS sur un
+ * extrait serait trompeuse : le texte complet est d'abord lu sur la page d'origine
+ * (si le site le permet), sinon il est demandé à l'utilisateur.
+ */
+async function ensureFullText(ctx: UserContext, job: Job): Promise<Job> {
+  const flags = (job.flags ?? {}) as Record<string, unknown>;
+  if (!flags.partialDescription) return job;
+  const url = job.applyUrl || job.canonicalUrl;
+  if (url) {
+    try {
+      const page = await fetchJobPage(ctx, url);
+      const text = page.job?.descriptionText?.trim() ? htmlToText(page.job.descriptionText) : page.job?.descriptionHtml ? htmlToText(page.job.descriptionHtml) : '';
+      if (text.length >= 600 && text.length > job.descriptionText.length * 1.4) {
+        const next = { ...flags };
+        delete next.partialDescription;
+        const [updated] = await ctx.db.update(jobs).set({ descriptionText: text, descriptionHash: descriptionHash(text), flags: next, updatedAt: ctx.now() }).where(eq(jobs.id, job.id)).returning();
+        return updated ?? job;
+      }
+    } catch (err) {
+      if (!(err instanceof FetchError)) throw err;
+    }
+  }
+  await raiseAction(ctx.db, { userId: ctx.userId, type: 'job.needs_text', title: `Texte de l'annonce à compléter : ${job.companyName} — ${job.title}`, body: { text: "Cette source ne fournit qu'un extrait de l'annonce et le site d'origine ne permet pas de la lire automatiquement. Ouvrez l'annonce, copiez son texte complet et collez-le dans la fiche : l'analyse ATS reprendra aussitôt.", link: `/offres/${job.id}` }, jobId: job.id, priority: 60, dedupKey: `job.needs_text:${job.id}` });
+  throw new NeedsHumanError("Texte complet de l'annonce indisponible.", 'job_text_missing');
+}
+
 registerTaskHandler('job.ats', async (ctx, task) => {
   const p = payloadOf(task.payload);
   if (!p.jobId) return { skipped: 'no_job' };
   const job = await getJob(ctx, p.jobId);
   if (!['to_analyze', 'analyzed', 'awaiting_feedback'].includes(job.stage)) return { skipped: `statut ${job.stage}` };
   try {
-    const result = await runAtsAnalysis(ctx, { job, force: p.force });
+    const full = await ensureFullText(ctx, job);
+    const result = await runAtsAnalysis(ctx, { job: full, force: p.force });
     // Analyse identique déjà faite et déjà présentée : rien ne change, rien n'est rejoué.
     if (result.reused && job.latestAnalysisId === result.analysis.id && job.stage !== 'to_analyze' && !p.thenTailor) return { score: result.parsed.total20, decision: result.decision, route: 'unchanged', reused: true };
     const next = await afterAnalysis(ctx, await getJob(ctx, job.id), result, { manual: p.manual });
