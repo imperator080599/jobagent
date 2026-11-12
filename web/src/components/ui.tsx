@@ -81,9 +81,9 @@ export function Card({ className, children, ...rest }: React.HTMLAttributes<HTML
   );
 }
 
-export function CardHeader({ title, description, action, icon }: { title: ReactNode; description?: ReactNode; action?: ReactNode; icon?: ReactNode }) {
+export function CardHeader({ title, description, action, icon, flush }: { title: ReactNode; description?: ReactNode; action?: ReactNode; icon?: ReactNode; /** Sans marge propre : pour une carte qui porte déjà son espacement. */ flush?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3">
+    <div className={cx('flex items-start justify-between gap-4', !flush && 'px-5 pt-4 pb-3')}>
       <div className="flex min-w-0 items-start gap-3">
         {icon && <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">{icon}</div>}
         <div className="min-w-0">

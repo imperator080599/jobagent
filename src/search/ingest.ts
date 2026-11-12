@@ -18,6 +18,7 @@ import {
   extractYears,
   fingerprint,
   htmlToText,
+  inferLocation,
   offerLanguage,
   parseLocation,
   titleKey,
@@ -85,8 +86,8 @@ function toDate(v: Date | string | null | undefined): Date | null {
 export function normalizeJob(raw: RawJob): NormalizedJob {
   const title = clean(raw.title);
   const companyName = clean(raw.company);
-  const locationRaw = clean(raw.location);
   const description = raw.descriptionText?.trim() ? htmlToText(raw.descriptionText) : htmlToText(raw.descriptionHtml ?? '');
+  const locationRaw = clean(raw.location) || inferLocation(description);
   const loc = parseLocation(locationRaw, raw.country ?? '');
   const canon = canonicalUrl(raw.url ?? '');
   const years = extractYears(description);

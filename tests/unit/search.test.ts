@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalUrl, companyKey, detectContract, detectSeniority, extractYears, fingerprint, htmlToText, parseLocation, titleKey } from '../../src/search/normalize.js';
+import { canonicalUrl, companyKey, detectContract, detectSeniority, extractYears, fingerprint, htmlToText, inferLocation, parseLocation, titleKey } from '../../src/search/normalize.js';
 import { parseRobots, robotsAllows } from '../../src/search/http.js';
 import { findJobPostings, readJobPage } from '../../src/search/page.js';
 import { guessJobFields } from '../../src/search/extract.js';
@@ -63,6 +63,17 @@ describe('localisation', () => {
     expect(parseLocation('Remote - France')).toMatchObject({ country: 'FR', remote: 'remote' });
     expect(parseLocation('Ho Chi Minh City, Vietnam')).toMatchObject({ city: 'Ho Chi Minh City', country: 'VN' });
     expect(parseLocation('Angers', 'France')).toEqual({ city: 'Angers', country: 'FR', remote: '' });
+  });
+});
+
+describe('lieu déduit du texte', () => {
+  it('retient un lieu annoncé explicitement et reconnu, rien d’autre', () => {
+    expect(inferLocation('Poste en CDI, basé à Paris.')).toBe('Paris');
+    expect(inferLocation('The role is based in London with occasional travel.')).toBe('London');
+    expect(inferLocation('Location: Luxembourg, Luxembourg\nAbout us…')).toBe('Luxembourg, Luxembourg');
+    expect(inferLocation('Lieu : La Défense (92)')).toBe('Paris');
+    expect(inferLocation('Notre siège historique se trouve en région lyonnaise.')).toBe('');
+    expect(inferLocation('Vous serez basé à Trifouillis-les-Oies.')).toBe('');
   });
 });
 

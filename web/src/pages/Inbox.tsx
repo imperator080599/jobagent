@@ -22,6 +22,7 @@ const TYPE_LABELS: Record<string, { label: string; tone: 'brand' | 'warning' | '
   'setup.llm_key': { label: 'Démarrage', tone: 'brand' },
   'setup.ats_prompt': { label: 'Démarrage', tone: 'brand' },
   'setup.search': { label: 'Démarrage', tone: 'brand' },
+  'setup.letter_template': { label: 'Démarrage', tone: 'brand' },
   'cv.master.review': { label: 'CV master', tone: 'warning' },
   'fact.conflict': { label: 'Information à confirmer', tone: 'warning' },
   'linkedin.diffs': { label: 'LinkedIn', tone: 'info' },
@@ -71,7 +72,7 @@ export function InboxPage() {
       ) : (
         <ul className="space-y-3">
           {items.map((item) => {
-            if (item.type === 'job.review' || item.type === 'document.review' || item.type === 'application.authorize' || item.type === 'job.question') {
+            if (item.type === 'job.review' || item.type === 'application.validate' || item.type === 'application.submit') {
               return (
                 <li key={item.id}>
                   <JobReviewCard item={item} onDone={refresh} />

@@ -220,6 +220,28 @@ export function parseLocation(raw: string, hintCountry = ''): ParsedLocation {
   return { city, country, remote };
 }
 
+const LOCATION_CUE = /(?:bas[ée]e?s? (?:à|au|en|aux)|situ[ée]e?s? (?:à|au|en)|localis[ée]e?s? (?:à|au|en)|lieu(?: de travail)?\s*:|localisation\s*:|based in|located in|location\s*:|office in|standort\s*:|ubicaci[óo]n\s*:)\s+/giu;
+// Nom de lieu : un à quatre mots commençant par une majuscule, éventuellement suivis de « , Pays ».
+const PLACE_NAME = /^(\p{Lu}[\p{L}'’-]*(?:[ -]\p{Lu}[\p{L}'’-]*){0,3}(?:,[^\S\n]*\p{Lu}[\p{L}'’-]*(?:[ -]\p{Lu}[\p{L}'’-]*){0,2})?)/u;
+
+/**
+ * Lieu de travail lu dans le texte de l'annonce (« basé à Paris », « Location: London »)
+ * lorsque la source n'en fournit pas. Seul un lieu reconnu du référentiel est retenu :
+ * rien n'est deviné.
+ */
+export function inferLocation(text: string): string {
+  const head = text.slice(0, 8000);
+  const knownCity = (city: string) => Object.values(CITIES).some(([name]) => name === city);
+  for (const cue of head.matchAll(LOCATION_CUE)) {
+    const candidate = PLACE_NAME.exec(head.slice((cue.index ?? 0) + cue[0].length))?.[1]?.trim();
+    if (!candidate) continue;
+    const parsed = parseLocation(candidate);
+    if (knownCity(parsed.city)) return candidate.includes(',') ? candidate : parsed.city;
+    if (parsed.country && COUNTRY_LOOKUP.has(normalize(candidate))) return candidate;
+  }
+  return '';
+}
+
 // ── Contrat, séniorité, expérience ──
 
 export type ContractType = '' | 'cdi' | 'cdd' | 'vie' | 'internship' | 'apprenticeship' | 'freelance' | 'temp' | 'graduate';
