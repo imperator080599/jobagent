@@ -98,8 +98,12 @@ const T: Record<Stage, Stage[]> = {
   expired: ['to_analyze'],
 };
 
+/** Statuts antérieurs à l'envoi : l'utilisateur peut déclarer à tout moment qu'il a postulé de son côté. */
+const PRE_SUBMIT: Stage[] = ['new', 'to_analyze', 'analyzed', 'awaiting_feedback', 'cv_in_progress', 'letter_in_progress', 'ready_to_apply', 'applying', 'filtered', 'abandoned', 'expired'];
+
 export function canTransition(from: Stage, to: Stage): boolean {
   if (from === to) return true;
+  if (to === 'sent' && PRE_SUBMIT.includes(from)) return true;
   return T[from]?.includes(to) ?? false;
 }
 

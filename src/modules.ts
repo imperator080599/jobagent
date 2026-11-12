@@ -8,6 +8,7 @@ import { adminRoutes } from './api/routes/admin.js';
 import { linkedinRoutes } from './api/routes/linkedin.js';
 import { documentsRoutes } from './api/routes/documents.js';
 import { jobsRoutes } from './api/routes/jobs.js';
+import { applicationsRoutes } from './api/routes/applications.js';
 import './docs/index.js';
 import './profile/index.js';
 import './pipeline/index.js';
@@ -20,3 +21,4 @@ registerRoutes('private', (app, deps) => app.route('/admin', adminRoutes(deps)))
 registerRoutes('private', (app, deps) => app.route('/profile/linkedin', linkedinRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/documents', documentsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/jobs', jobsRoutes(deps)));
+registerRoutes('private', (app, deps) => app.route('/applications', applicationsRoutes(deps)));

@@ -364,6 +364,55 @@ describe('de l’offre aux documents prêts', () => {
   }, 180_000);
 });
 
+describe('candidature', () => {
+  it('contrôle le dossier, valide les documents, enregistre l’envoi et interdit toute seconde candidature', async () => {
+    const [job] = await t.ctx.db.select().from(jobs).where(and(eq(jobs.userId, userId), eq(jobs.stage, 'ready_to_apply')));
+    const pack = await api.get(`/api/applications/${job!.id}`);
+    expect(pack.status).toBe(200);
+    expect(pack.data.qa.ok).toBe(true);
+    expect(pack.data.qa.checks.find((c: any) => c.id === 'duplicate').ok).toBe(true);
+    expect(pack.data.qa.checks.find((c: any) => c.id === 'email').message).toContain('camille.durand@example.test');
+
+    const approved = await api.post(`/api/applications/${job!.id}/approve`);
+    expect(approved.status).toBe(200);
+    expect(approved.data.cv.status).toBe('approved');
+    expect(approved.data.letter.status).toBe('approved');
+    expect(approved.data.application).toMatchObject({ mode: 'manual', authorizedBy: 'user', cvVersionId: approved.data.cv.id, letterId: approved.data.letter.id });
+    // Validation ≠ envoi : l'offre reste « prête à candidater » tant que l'envoi n'est pas déclaré.
+    expect((await jobRow(job!.id)).stage).toBe('ready_to_apply');
+    const inbox = (await api.get('/api/inbox')).data.items;
+    expect(inbox.some((i: any) => i.type === 'application.validate' && i.jobId === job!.id)).toBe(false);
+    expect(inbox.find((i: any) => i.type === 'application.submit' && i.jobId === job!.id).body.cvPdfFileId).toBe(approved.data.cv.pdfFileId);
+
+    const sent = await api.post(`/api/applications/${job!.id}/submitted`, { channel: 'Site carrières' });
+    expect(sent.status).toBe(200);
+    expect(sent.data.job.stage).toBe('sent'); // envoyée, mais pas « confirmée » : aucun accusé de réception
+    expect(sent.data.application.confirmedAt).toBeNull();
+    const due = new Date(sent.data.application.followUpDueAt).getTime() - new Date(sent.data.application.submittedAt).getTime();
+    expect(Math.round(due / 86400_000)).toBe(10);
+    expect((await api.post(`/api/applications/${job!.id}/submitted`, {})).status).toBe(409);
+
+    // La même offre revue ailleurs : reconnue, signalée comme déjà traitée, jamais reproposée.
+    const again = await api.post('/api/jobs', { text: OFFER(), company: 'VALMONT ADVISORY SAS', title: 'Consultant Transaction Services F/H', location: 'Paris' });
+    expect(again.data.outcome).toBe('duplicate');
+    expect(again.data.verdict.alreadyApplied).toBe(true);
+    expect((await api.post(`/api/jobs/${job!.id}/review`, { decision: 'pursue' })).status).toBe(409);
+  });
+
+  it('distingue l’envoi déclaré de la confirmation reçue, et accepte un envoi fait hors du parcours', async () => {
+    const added = await api.post('/api/jobs', { text: OFFER().replace(/Valmont Advisory/g, 'Marceau Finance Conseil') });
+    expect(added.status).toBe(201);
+    const sent = await api.post(`/api/applications/${added.data.job.id}/submitted`, { channel: 'Email', confirmationText: 'Nous accusons réception de votre candidature (réf. MFC-2291).' });
+    expect(sent.status).toBe(200);
+    expect(sent.data.job.stage).toBe('confirmed');
+    expect(sent.data.application.confirmation.text).toContain('MFC-2291');
+    const list = await api.get('/api/applications');
+    expect(list.data.items.some((i: any) => i.jobId === added.data.job.id && i.stage === 'confirmed')).toBe(true);
+    await work(); // la tâche d'analyse en file ne doit rien défaire
+    expect((await jobRow(added.data.job.id)).stage).toBe('confirmed');
+  });
+});
+
 describe('sélection, coûts et sécurité', () => {
   it('écarte une offre hors critères en gardant la raison, et la rétablit à la demande', async () => {
     await t.ctx.db.insert(searchProfiles).values({ id: newId('sp'), userId, name: 'Transaction Services France', config: SearchCriteria.parse({ titles: ['Consultant Transaction Services', 'Analyste due diligence financière'], countries: ['FR'], contracts: ['cdi'] }) });
