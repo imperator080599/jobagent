@@ -212,13 +212,13 @@ describe('synchronisation et arbitrage', () => {
 
     await setSetting(t.ctx.db, userId, 'linkedin.sync', { enabled: true, intervalDays: 7 });
     expect((await schedulerTick(t.ctx)).started).toContain(`linkedin.sync:${userId}`);
-    expect((await runWorker(t.ctx, { budgetMs: 10_000, workerId: 'w' })).processed).toBe(1);
+    expect((await runWorker(t.ctx, { budgetMs: 10_000, workerId: 'w', types: ['linkedin.sync'] })).processed).toBe(1);
     // Pas de nouvelle exécution avant l'intervalle configuré.
     expect((await schedulerTick(t.ctx)).started).not.toContain(`linkedin.sync:${userId}`);
     t.clock.advance(8 * 86400_000);
     apiMode = 'expired';
     expect((await schedulerTick(t.ctx)).started).toContain(`linkedin.sync:${userId}`);
-    const w = await runWorker(t.ctx, { budgetMs: 10_000, workerId: 'w' });
+    const w = await runWorker(t.ctx, { budgetMs: 10_000, workerId: 'w', types: ['linkedin.sync'] });
     expect(w).toMatchObject({ processed: 1, blocked: 1 });
   });
 

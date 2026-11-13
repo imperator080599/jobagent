@@ -10,6 +10,7 @@ describe('adresse canonique', () => {
     expect(canonicalUrl('https://job-boards.greenhouse.io/Acme/jobs/4512345')).toEqual({ url: 'https://job-boards.greenhouse.io/acme/jobs/4512345', ref: 'gh:4512345' });
     expect(canonicalUrl('https://jobs.lever.co/acme/1b2c3d4e-aaaa-bbbb-cccc-1234567890ab/apply?lever-source=LinkedIn').ref).toBe('lever:1b2c3d4e-aaaa-bbbb-cccc-1234567890ab');
     expect(canonicalUrl('https://www.linkedin.com/jobs/view/senior-analyst-at-acme-3812345678/?trk=public_jobs&refId=xyz').url).toBe('https://www.linkedin.com/jobs/view/3812345678');
+    expect(canonicalUrl('https://www.linkedin.com/comm/jobs/view/3812345678/?trackingId=abc&refId=x').url).toBe('https://www.linkedin.com/jobs/view/3812345678');
     expect(canonicalUrl('https://fr.indeed.com/viewjob?jk=abc123def&from=serp&vjs=3')).toEqual({ url: 'https://fr.indeed.com/viewjob?jk=abc123def', ref: 'indeed:abc123def' });
   });
 

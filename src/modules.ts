@@ -10,10 +10,12 @@ import { documentsRoutes } from './api/routes/documents.js';
 import { jobsRoutes } from './api/routes/jobs.js';
 import { applicationsRoutes } from './api/routes/applications.js';
 import { searchRoutes } from './api/routes/search.js';
+import { mailRoutes } from './api/routes/mail.js';
 import './docs/index.js';
 import './profile/index.js';
 import './pipeline/index.js';
 import './search/index.js';
+import './tracker/index.js';
 
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/profile', profileRoutes(deps)));
@@ -25,3 +27,4 @@ registerRoutes('private', (app, deps) => app.route('/documents', documentsRoutes
 registerRoutes('private', (app, deps) => app.route('/jobs', jobsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/applications', applicationsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/search', searchRoutes(deps)));
+registerRoutes('private', (app, deps) => app.route('/mail', mailRoutes(deps)));

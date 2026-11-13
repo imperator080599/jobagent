@@ -27,6 +27,8 @@ export function settingsRoutes(deps: AppDeps) {
   r.put('/:key', sessionOnly, async (c) => {
     const key = c.req.param('key');
     if (!isSettingKey(key)) throw badRequest(`Paramètre inconnu : ${key}`);
+    // Les autorisations Gmail ne se déclarent pas : elles résultent de la connexion OAuth.
+    if (key === 'email.gmail') throw badRequest('Ce réglage se modifie depuis Paramètres → Messagerie.');
     const input = await body(c, z.object({ value: z.unknown() }));
     const value = await setSetting(ctx.db, c.get('user').id, key, input.value);
     // Un budget relevé ou un plafond modifié libère les tâches mises en attente pour ce motif.

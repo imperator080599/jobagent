@@ -55,7 +55,8 @@ export function client(app: Hono<AppEnv>) {
   let cookie = '';
   const call = async (method: string, path: string, json?: unknown, headers: Record<string, string> = {}) => {
     const h: Record<string, string> = { 'x-jobagent-client': 'web', ...headers };
-    if (cookie) h.cookie = cookie;
+    // Cookie de session du client, complété le cas échéant par des cookies fournis par le test.
+    if (cookie) h.cookie = headers.cookie ? `${cookie}; ${headers.cookie}` : cookie;
     let reqBody: string | FormData | undefined;
     if (json instanceof FormData) reqBody = json;
     else if (json !== undefined) {

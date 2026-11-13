@@ -46,8 +46,10 @@ export function canonicalUrl(input: string): CanonicalUrl {
     ref = `sr:${id}`;
     return { url: `https://jobs.smartrecruiters.com/${seg[0]}/${id}`, ref };
   }
-  if (host.endsWith('linkedin.com') && seg[0] === 'jobs' && seg[1] === 'view' && seg[2]) {
-    const id = /(\d{6,})\/?$/.exec(seg[2])?.[1] ?? seg[2];
+  // Les liens des emails LinkedIn passent par « /comm/jobs/view/… » : même offre, même adresse canonique.
+  const li = host.endsWith('linkedin.com') && seg[0] === 'comm' ? seg.slice(1) : seg;
+  if (host.endsWith('linkedin.com') && li[0] === 'jobs' && li[1] === 'view' && li[2]) {
+    const id = /(\d{6,})\/?$/.exec(li[2])?.[1] ?? li[2];
     ref = `li:${id}`;
     return { url: `https://www.linkedin.com/jobs/view/${id}`, ref };
   }
