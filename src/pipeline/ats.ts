@@ -105,7 +105,7 @@ const cellsOf = (line: string): string[] => {
 };
 
 /** Lecture déterministe : tableau d'items notés sur 5 et note globale sur 20. */
-export function parseAtsReport(raw: string): { total20: number | null; items: AtsItem[]; source: 'report' | 'items' | 'none' } {
+export function parseAtsReport(raw: string): { total20: number | null; items: AtsItem[]; source: 'report' | 'items' | 'none'; candidates: number[]; confidence: 'row' | 'line' | 'fallback' } {
   const items: AtsItem[] = [];
   const lines = raw.split('\n');
   // Colonnes du tableau en cours : la note peut être écrite « 4/5 » dans la cellule, ou « 4 » sous un en-tête « Note /5 ».
@@ -135,21 +135,46 @@ export function parseAtsReport(raw: string): { total20: number | null; items: At
     if (!label || /^(total|somme|note globale|note finale|score)/i.test(label)) continue;
     items.push({ label, score5: score, improvement: (cells[cells.length - 1] === cells[idx] ? '' : cells.slice(idx + 1).pop() ?? '').trim() });
   }
-  const totals = [...raw.matchAll(/(\d{1,2}(?:[.,]\d{1,2})?)\s*\/\s*20\b/g)].map((m) => ({ value: num(m[1]!), index: m.index ?? 0 })).filter((t) => t.value >= 0 && t.value <= 20);
+  // Note globale. Un rapport cite souvent plusieurs « x/20 » : la note attribuée, mais aussi celle qu'il
+  // prévoit après optimisation. Seule la note attribuée compte.
+  const HYPOTHETICAL = /(devrait|pourrait|pourra|viser|objectif|potentiel|atteindr|après (optimisation|correction|intégration)|une fois|optimis[ée]|estim[ée]|projet[ée]|would|could|should|target|expected|after (optimi[sz]|updat|fix))[^.|\n]{0,60}$/i;
+  const all = [...raw.matchAll(/(\d{1,2}(?:[.,]\d{1,2})?)\s*\/\s*20\b/g)].map((m) => ({ value: num(m[1]!), index: m.index ?? 0 })).filter((t) => t.value >= 0 && t.value <= 20);
+  const candidates = [...new Set(all.map((t) => t.value))];
+  const lineStart = (i: number) => raw.lastIndexOf('\n', i) + 1;
+  const lineOf = (i: number) => raw.slice(lineStart(i), raw.indexOf('\n', i) === -1 ? raw.length : raw.indexOf('\n', i));
+  const hypothetical = (t: { index: number }) => HYPOTHETICAL.test(raw.slice(Math.max(lineStart(t.index), t.index - 90), t.index));
   let total: number | null = null;
-  if (totals.length) {
-    const lineOf = (i: number) => raw.slice(raw.lastIndexOf('\n', i) + 1, raw.indexOf('\n', i) === -1 ? raw.length : raw.indexOf('\n', i));
-    const labelled = totals.filter((t) => /(total|note (globale|finale|ajust)|score (global|final|ats)|somme|ajust[ée]e? sur 20|sur 20)/i.test(lineOf(t.index)));
-    total = (labelled.length ? labelled[labelled.length - 1]! : totals[totals.length - 1]!).value;
+  let confidence: 'row' | 'line' | 'fallback' = 'fallback';
+  // 1. Ligne « TOTAL » d'un tableau : la première cellule qui porte une note sur 20 (« 19,5/30 → 13/20 » donne 13).
+  for (const line of lines) {
+    if (!line.includes('|')) continue;
+    const cells = cellsOf(line);
+    if (!cells.some((c) => /^(total|note (globale|finale)|score (global|final)|somme)\b/i.test(c))) continue;
+    const cell = cells.find((c) => /\d\s*\/\s*20\b/.test(c));
+    const found = cell ? [...cell.matchAll(/(\d{1,2}(?:[.,]\d{1,2})?)\s*\/\s*20\b/g)] : [];
+    if (found.length) {
+      total = num(found[found.length - 1]![1]!);
+      confidence = 'row';
+    }
   }
-  if (total != null) return { total20: total, items, source: 'report' };
+  // 2. Phrase qui annonce la note (« Note globale : 13/20 »), hors formulations au conditionnel.
+  if (total == null) {
+    const labelled = all.filter((t) => !hypothetical(t) && /(total|note (globale|finale|ajust)|score (global|final|ats)|somme|ajust[ée]e? sur 20)/i.test(lineOf(t.index)));
+    if (labelled.length) {
+      total = labelled[labelled.length - 1]!.value;
+      confidence = 'line';
+    }
+  }
+  // 3. À défaut, la dernière note sur 20 qui n'est pas une projection.
+  if (total == null && all.length) total = (all.filter((t) => !hypothetical(t)).pop() ?? all[all.length - 1]!).value;
+  if (total != null) return { total20: total, items, source: 'report', candidates, confidence };
   const scored = items.filter((i) => i.score5 != null);
   if (scored.length >= 3) {
     // « Ajuste la somme des points sur 20 » : somme des notes rapportée au maximum possible.
     const sum = scored.reduce((a, i) => a + (i.score5 ?? 0), 0);
-    return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, items, source: 'items' };
+    return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, items, source: 'items', candidates, confidence: 'fallback' };
   }
-  return { total20: null, items, source: 'none' };
+  return { total20: null, items, source: 'none', candidates, confidence: 'fallback' };
 }
 
 const AtsExtract = z.object({
@@ -171,15 +196,23 @@ export async function extractAtsReport(ctx: UserContext, raw: string, jobId?: st
   } catch (err) {
     ctx.log.warn('ats_extract_failed', { error: String(err) });
   }
-  const total20 = det.total20 ?? ext?.total20 ?? null;
-  const scoreConflict = det.total20 != null && ext?.total20 != null && Math.abs(det.total20 - ext.total20) > 0.5;
+  // Deux lectures indépendantes de la note : le code, puis le modèle économique. La ligne « TOTAL » du tableau fait foi ;
+  // à défaut, si le modèle désigne une autre note qui figure bien dans le rapport, c'est elle qui est retenue.
+  // Tout désaccord restant est signalé à l'utilisateur.
+  const disagree = det.total20 != null && ext?.total20 != null && Math.abs(det.total20 - ext.total20) > 0.5;
+  const trustExtraction = disagree && det.confidence !== 'row' && det.candidates.some((v) => Math.abs(v - ext!.total20!) < 0.05);
+  const total20 = trustExtraction ? ext!.total20 : (det.total20 ?? ext?.total20 ?? null);
+  // La note recalculée à partir des items sert de troisième témoin.
+  const scored = det.items.filter((i) => i.score5 != null);
+  const fromItems = scored.length >= 3 ? Math.round((scored.reduce((a, i) => a + (i.score5 ?? 0), 0) / (scored.length * 5)) * 200) / 10 : null;
+  const scoreConflict = disagree && !(fromItems != null && total20 != null && Math.abs(fromItems - total20) <= 0.5);
   return {
     total20,
     items: det.items.length >= (ext?.items.length ?? 0) ? det.items : (ext?.items ?? []),
     missingKeywords: [...new Set((ext?.missingKeywords ?? []).map((k) => k.trim()).filter(Boolean))],
     alerts: ext?.alerts ?? [],
     summary: ext?.summary ?? '',
-    scoreSource: det.total20 != null ? det.source : ext?.total20 != null ? 'extraction' : 'none',
+    scoreSource: trustExtraction ? 'extraction' : det.total20 != null ? det.source : ext?.total20 != null ? 'extraction' : 'none',
     ...(scoreConflict ? { scoreConflict: true } : {}),
   };
 }

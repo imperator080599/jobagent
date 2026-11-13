@@ -103,6 +103,11 @@ describe('prompt ATS de l’utilisateur', () => {
       { label: 'Mots-clés', score5: 2.5, improvement: 'Intégrer.' },
     ]);
     expect(parsedReal.total20).toBe(12.7);
+    // Cas réel : la ligne TOTAL porte la note attribuée ET une projection après optimisation. Seule la première compte.
+    const projected = '| # | Item | Note /5 | Constat | Amélioration |\n|---|---|---|---|---|\n| 1 | Titre | **3** | x | y |\n| 2 | Format | **4** | x | y |\n| 3 | Structure | **3** | x | y |\n| 4 | Mots-clés | **2,5** | x | y |\n| 5 | Abréviations | **3** | x | y |\n| 6 | Illisibles | **4** | x | y |\n| | **TOTAL** | **19,5 / 30 → 13 / 20** | | Avec les corrections proposées, le CV optimisé devrait se situer autour de **17 / 20**. |';
+    expect(parseAtsReport(projected)).toMatchObject({ total20: 13, confidence: 'row' });
+    expect(parseAtsReport('Note globale : 12/20. Après optimisation, le CV pourrait atteindre 16/20.').total20).toBe(12);
+    expect(parseAtsReport('Votre CV devrait viser 18/20.\n\n**Note globale ajustée : 11,5/20**').total20).toBe(11.5);
   });
 });
 

@@ -29,7 +29,7 @@ const LetterOut = z.object({
   sections: z.array(z.object({ key: z.string().describe('Clé de la rubrique du modèle.'), paragraphs: z.array(z.string()).min(1).max(3).describe('Un à trois paragraphes rédigés.') })),
   subject: z.string().describe("Objet de la lettre (ex. « Candidature au poste de … »), dans la langue de la lettre."),
   recipientName: z.string().describe("Nom du destinataire s'il est cité explicitement dans l'annonce, sinon chaîne vide. Ne jamais le deviner."),
-  notes: z.string().describe('Informations qui manquaient pour personnaliser la lettre, à signaler au candidat. Chaîne vide si rien.'),
+  notes: z.string().describe('Informations qui manquaient pour personnaliser la lettre, à signaler au candidat. Toujours en français, quelle que soit la langue de la lettre. Chaîne vide si rien.'),
 });
 type LetterOut = z.infer<typeof LetterOut>;
 

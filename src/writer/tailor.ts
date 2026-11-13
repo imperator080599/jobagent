@@ -32,7 +32,7 @@ export const TailorOut = z.object({
   skills: z.array(z.object({ id: z.string(), items: z.array(z.string()) })).describe('Groupes de compétences réordonnés ou complétés d\'une compétence confirmée par le candidat.'),
   keywordsIntegrated: z.array(z.string()).describe("Mots-clés de l'offre désormais présents dans le CV."),
   keywordsSkipped: z.array(z.object({ keyword: z.string(), reason: z.string() })).describe("Mots-clés de l'offre NON intégrés, faute d'expérience réelle qui les justifie."),
-  notes: z.string().describe('Remarques utiles au candidat (limites, arbitrages), deux phrases au plus.'),
+  notes: z.string().describe('Remarques utiles au candidat (limites, arbitrages), deux phrases au plus, en français.'),
 });
 export type TailorOut = z.infer<typeof TailorOut>;
 
