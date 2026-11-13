@@ -70,7 +70,7 @@ export function NotificationsSettings() {
           <div className="flex flex-wrap items-end gap-4">
             <Switch checked={digest.value.enabled} onChange={(enabled) => digest.save({ ...digest.value!, enabled })} label="Activer" />
             <Field label="Heure d'envoi (votre fuseau)">
-              <Input type="time" className="w-32" defaultValue={`${String(digest.value.hour).padStart(2, '0')}:${String(digest.value.minute).padStart(2, '0')}`} onBlur={(e) => { const [h, m] = e.target.value.split(':').map(Number); if (h !== undefined && m !== undefined && (h !== digest.value!.hour || m !== digest.value!.minute)) digest.save({ ...digest.value!, hour: h, minute: m }); }} />
+              <div className="w-32"><Input type="time" defaultValue={`${String(digest.value.hour).padStart(2, '0')}:${String(digest.value.minute).padStart(2, '0')}`} onBlur={(e) => { const [h, m] = e.target.value.split(':').map(Number); if (h !== undefined && m !== undefined && (h !== digest.value!.hour || m !== digest.value!.minute)) digest.save({ ...digest.value!, hour: h, minute: m }); }} /></div>
             </Field>
           </div>
           {preview.data && (

@@ -103,7 +103,7 @@ export function MailSettings() {
           <Switch checked={schedule.value?.enabled ?? false} disabled={!g.connected} onChange={(enabled) => schedule.save({ ...(schedule.value ?? { intervalMinutes: 30 }), enabled })} label="Lire automatiquement les nouveaux messages" description={`Toutes les ${schedule.value?.intervalMinutes ?? 30} minutes, même ordinateur éteint.`} />
           <Switch checked={g.importAlerts} onChange={(importAlerts) => save.mutate({ importAlerts })} label="Importer les offres de mes alertes email" description="Les offres citées dans vos alertes (LinkedIn, Indeed, Welcome to the Jungle…) sont ajoutées à votre liste. Leur texte complet reste à coller avant toute analyse : ces sites ne sont jamais lus automatiquement." />
           <Field label="Profondeur de la première lecture" hint="En jours.">
-            <Input type="number" min={1} max={180} className="w-28" defaultValue={g.lookbackDays} onBlur={(e) => Number(e.target.value) !== g.lookbackDays && save.mutate({ lookbackDays: Math.max(1, Math.min(180, Number(e.target.value) || 30)) })} />
+            <div className="w-28"><Input type="number" min={1} max={180} defaultValue={g.lookbackDays} onBlur={(e) => Number(e.target.value) !== g.lookbackDays && save.mutate({ lookbackDays: Math.max(1, Math.min(180, Number(e.target.value) || 30)) })} /></div>
           </Field>
         </div>
       </Card>
