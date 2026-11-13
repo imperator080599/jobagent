@@ -174,6 +174,9 @@ export function assignIds(cv: CvData): CvData {
  */
 export function normalizeMarkup(text: string): string {
   let out = text
+    // Italique ouvert ou fermé au milieu d'un mot (changement de police sur un trait d'union, dans un PDF) : étendu au mot entier.
+    .replace(/(?<![*\w])\*(?![\s*])([^*\n]+?)\*(?!\*)([\p{L}\p{N}'’-]+)/gu, '*$1$2*')
+    .replace(/([\p{L}\p{N}'’-]+)(?<!\*)\*(?![\s*])([^*\n]+?)\*(?![*\w])/gu, (m, pre: string, body: string) => (/\*/.test(pre) ? m : `*${pre}${body}*`))
     .replace(/\*\*\*(\s*)\*\*\*/g, '$1')
     .replace(/(?<!\*)\*\*(\s*)\*\*(?!\*)/g, '$1')
     .replace(/(?<![*\w])\*(\s+)\*(?![*\s])/g, '$1');

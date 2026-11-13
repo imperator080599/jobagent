@@ -15,6 +15,8 @@ export const SECRET_KEYS = [
   'francetravail_client_secret',
   'jooble_api_key',
   'webhook_secret',
+  'google_client_secret',
+  'gmail_refresh_token',
 ] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 

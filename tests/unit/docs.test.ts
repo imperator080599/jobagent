@@ -9,7 +9,7 @@ import { closing, formatLetterDate, salutation } from '../../src/docs/letter-con
 import { analyzeLetterTemplate, renderLetter } from '../../src/docs/letter-template.js';
 import { checkRenderedDocument, measurePdf, unexpectedFonts } from '../../src/docs/qa.js';
 import { parseCvHeuristic } from '../../src/profile/cv-parse.js';
-import { type CvData, cvToText, emptyCv, parseMarkup, stripMarkup } from '../../src/shared/cv.js';
+import { type CvData, cvToText, emptyCv, normalizeMarkup, parseMarkup, stripMarkup } from '../../src/shared/cv.js';
 
 const caps = await documentCapabilities();
 const withOffice = caps.office && caps.poppler ? it : it.skip;
@@ -300,7 +300,7 @@ describe('mise en valeur balisée', () => {
     const { normalizeMarkup } = await import('../../src/shared/cv.js');
     expect(normalizeMarkup('***a highly selective*** ***two-year program***')).toBe('***a highly selective two-year program***');
     expect(normalizeMarkup('**Revue** **des comptes** annuels')).toBe('**Revue des comptes** annuels');
-    expect(normalizeMarkup('**Titre:** *a highly selective post-*secondary program')).toBe('**Titre:** a highly selective post-secondary program');
+    expect(normalizeMarkup('**Titre:** *a highly selective post-*secondary program')).toBe('**Titre:** *a highly selective post-secondary* program');
     expect(normalizeMarkup('**Audit des comptes')).toBe('Audit des comptes');
     // Un astérisque arithmétique n'est pas une balise.
     expect(normalizeMarkup('Marge de 3 * 4 points')).toBe('Marge de 3 * 4 points');
@@ -326,6 +326,10 @@ describe('texte brut du CV', () => {
     expect(stripMarkup('*a highly selective post-*secondary programme')).toBe('a highly selective post-secondary programme');
     expect(stripMarkup('**Reviewed** DCF tests and *italic* words')).toBe('Reviewed DCF tests and italic words');
     expect(stripMarkup('Marge 5 * 3 = 15')).toBe('Marge 5 * 3 = 15');
+    // À l'écriture d'un document, l'italique coupé au milieu d'un mot est étendu au mot entier (aucun astérisque littéral).
+    const spans = parseMarkup(normalizeMarkup('**Track:** *a highly selective post-*secondary programme'));
+    expect(spans.map((x) => [x.text, x.bold, x.italic])).toEqual([['Track:', true, false], [' ', false, false], ['a highly selective post-secondary', false, true], [' programme', false, false]]);
+    expect(parseMarkup(normalizeMarkup('pre*fix word* suite')).map((x) => x.text).join('')).toBe('prefix word suite');
   });
 
   it('n’ajoute aucun titre absent du document d’origine et emploie la langue du CV', () => {

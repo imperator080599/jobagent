@@ -12,7 +12,7 @@ import { getFile, saveFile } from '../core/files.js';
 import { raiseAction, resolveAction } from '../core/inbox.js';
 import { unblockByReason } from '../core/queue.js';
 import type { CvVersion } from '../profile/cv.js';
-import { buildClassicCv } from './classic-cv.js';
+import { CLASSIC_BUILDER_VERSION, DEFAULT_CLASSIC_STYLE, FIT_STEPS, buildClassicCv } from './classic-cv.js';
 import { docxToPdf, documentCapabilities, pdfToPng, toDocx } from './convert.js';
 import { type CvTemplateProfile, alignCvTemplate, renderCv } from './cv-template.js';
 import { type DocxPackage, readDocx, writeDocx } from './docx.js';
@@ -155,9 +155,27 @@ export async function importCvTemplate(ctx: UserContext, file: { filename: strin
 
 /** Constitue un template Word à partir du CV master quand aucun fichier Word n'a été fourni. */
 async function buildCvTemplate(ctx: UserContext, master: CvVersion, origin: 'built' | 'evolved', note: string): Promise<Template> {
-  const docx = await buildClassicCv(master.data);
-  const profile = alignCvTemplate(readDocx(docx), master.data);
-  return store(ctx, { kind: 'cv', name: `CV ${master.data.identity.fullName} (${master.language.toUpperCase()}).docx`, language: master.language, origin, source: { filename: 'cv-template.docx', mime: DOCX_MIME, data: docx }, docx, profile, masterCvId: master.id, notes: [note] });
+  // Le document constitué doit tenir sur la pagination du CV d'origine : les réglages sont resserrés par paliers jusqu'à y parvenir.
+  const target = Number((master.checks as { pages?: number } | null)?.pages) || 0;
+  const caps = await documentCapabilities();
+  let docx = await buildClassicCv(master.data);
+  const notes = [note];
+  if (target > 0 && caps.office) {
+    let fitted = false;
+    for (const [i, step] of FIT_STEPS.entries()) {
+      const candidate = i === 0 ? docx : await buildClassicCv(master.data, { ...DEFAULT_CLASSIC_STYLE, ...step });
+      const pages = (await measurePdf(await docxToPdf(candidate))).pages;
+      if (pages <= target) {
+        docx = candidate;
+        fitted = true;
+        if (i > 0) notes.push(step.size ? `Mise en page resserrée (marges, espacements, corps ${step.size} pt) pour tenir sur ${target} page(s), comme votre CV d'origine.` : `Marges et espacements légèrement resserrés pour tenir sur ${target} page(s), comme votre CV d'origine.`);
+        break;
+      }
+    }
+    if (!fitted) notes.push(`Ce document ne tient pas sur ${target} page(s) comme votre CV d'origine : importez votre CV au format Word pour retrouver sa mise en page exacte.`);
+  }
+  const profile = { ...alignCvTemplate(readDocx(docx), master.data), builder: CLASSIC_BUILDER_VERSION };
+  return store(ctx, { kind: 'cv', name: `CV ${master.data.identity.fullName} (${master.language.toUpperCase()}).docx`, language: master.language, origin, source: { filename: 'cv-template.docx', mime: DOCX_MIME, data: docx }, docx, profile, masterCvId: master.id, notes });
 }
 
 /**
@@ -168,7 +186,13 @@ async function buildCvTemplate(ctx: UserContext, master: CvVersion, origin: 'bui
  */
 export async function ensureCvTemplate(ctx: UserContext, master: CvVersion): Promise<Template> {
   const active = await getActiveTemplate(ctx.db, ctx.userId, 'cv', master.language);
-  if (active?.masterCvId === master.id) return active;
+  if (active?.masterCvId === master.id) {
+    // Un document constitué par une version antérieure du générateur est reconstruit ; un fichier fourni par l'utilisateur n'est jamais touché.
+    const meta = active.profile as { builder?: number; fromUpload?: boolean };
+    const stale = active.origin !== 'upload' && !meta.fromUpload && meta.builder !== CLASSIC_BUILDER_VERSION;
+    if (!stale) return active;
+    return buildCvTemplate(ctx, master, active.origin === 'built' ? 'built' : 'evolved', "Document Word constitué à partir de votre CV, faute de fichier Word d'origine. Importez votre CV au format Word pour que vos documents reprennent exactement votre mise en page.");
+  }
 
   if (!active) {
     const source = master.sourceFileId ? await getFile(ctx.db, ctx.userId, master.sourceFileId) : null;
@@ -188,7 +212,9 @@ export async function ensureCvTemplate(ctx: UserContext, master: CvVersion): Pro
     const pkg = await loadTemplateDocx(ctx.db, active);
     const rendered = renderCv(pkg, active.profile as unknown as CvTemplateProfile, previousMaster.data, master.data);
     const docx = writeDocx(rendered.pkg);
-    const profile = alignCvTemplate(readDocx(docx), master.data);
+    // La filiation est conservée : un template issu du fichier Word de l'utilisateur ne sera jamais remplacé par un document reconstitué.
+    const lineage = active.profile as { builder?: number; fromUpload?: boolean };
+    const profile = { ...alignCvTemplate(readDocx(docx), master.data), builder: lineage.builder, fromUpload: active.origin === 'upload' || Boolean(lineage.fromUpload) };
     if (!rendered.problems.length && !profile.unmatched.length) {
       return store(ctx, { kind: 'cv', name: active.name, language: master.language, origin: 'evolved', source: { filename: active.name, mime: DOCX_MIME, data: docx }, docx, profile, masterCvId: master.id, notes: ['Template mis à jour avec la nouvelle version du CV master.'] });
     }

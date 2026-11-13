@@ -26,6 +26,8 @@ export interface ClassicStyle {
   /** Position de la tabulation de droite (lieux et dates), en points depuis le bord gauche de la page. */
   rightTab: number;
   linkColor: string;
+  /** Interligne, en 240e de ligne (240 = simple). */
+  line?: number;
 }
 
 /** Dimensions mesurées sur un CV d'une page au format classique (Calibri 10 pt). */
@@ -41,6 +43,23 @@ export const DEFAULT_CLASSIC_STYLE: ClassicStyle = {
   rightTab: 546,
   linkColor: '0563C1',
 };
+
+/** Version du générateur : un document de travail constitué par une version antérieure est reconstruit. */
+export const CLASSIC_BUILDER_VERSION = 3;
+
+/**
+ * Réglages de plus en plus serrés, essayés dans l'ordre lorsque le document constitué
+ * dépasse la pagination du CV d'origine. La taille des caractères n'est réduite qu'en
+ * dernier recours, et jamais sous 9,5 pt.
+ */
+export const FIT_STEPS: Partial<ClassicStyle>[] = [
+  {},
+  { sectionSpacing: 8 },
+  { sectionSpacing: 7, margins: { top: 24, bottom: 24, left: 50, right: 36 } },
+  { sectionSpacing: 6, margins: { top: 22, bottom: 22, left: 46, right: 34 }, rightTab: 600 },
+  { sectionSpacing: 5, margins: { top: 20, bottom: 20, left: 42, right: 32 }, rightTab: 600, line: 232 },
+  { sectionSpacing: 5, margins: { top: 20, bottom: 20, left: 42, right: 32 }, rightTab: 600, line: 232, size: 9.5 },
+];
 
 const tw = (pt: number) => Math.round(pt * 20);
 
@@ -62,7 +81,7 @@ export async function buildClassicCv(cv: CvData, style: ClassicStyle = DEFAULT_C
   const half = style.size * 2;
   const textWidth = 595.3 - style.margins.left - style.margins.right;
   const rightTab = [{ type: TabStopType.RIGHT, position: tw(Math.min(textWidth, style.rightTab - style.margins.left)) }];
-  const line = { line: 240, lineRule: LineRuleType.AUTO, before: 0, after: 0 };
+  const line = { line: style.line ?? 240, lineRule: LineRuleType.AUTO, before: 0, after: 0 };
 
   const runs = (marked: string, base: { bold?: boolean; italics?: boolean } = {}) =>
     parseMarkup(normalizeMarkup(marked)).map((s) => new TextRun({ text: s.text, font: style.font, size: half, bold: base.bold || s.bold || undefined, italics: base.italics || s.italic || undefined }));

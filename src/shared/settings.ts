@@ -76,6 +76,25 @@ export const SETTINGS = {
     schema: z.object({ host: z.string(), port: z.number().int(), secure: z.boolean(), user: z.string(), from: z.string() }),
     default: { host: '', port: 465, secure: true, user: '', from: '' },
   },
+  /** Connexion Gmail par OAuth. Lecture et rédaction sont deux autorisations distinctes ; l'envoi reste désactivé par défaut. */
+  'email.gmail': {
+    schema: z.object({
+      clientId: z.string(),
+      /** Adresse du compte connecté (renseignée par la connexion). */
+      account: z.string(),
+      /** Autorisations réellement accordées par Google. */
+      canRead: z.boolean(),
+      canCompose: z.boolean(),
+      connectedAt: z.string(),
+      /** Autorise l'envoi d'un brouillon sur clic explicite. Jamais d'envoi automatique. */
+      allowSend: z.boolean(),
+      /** Profondeur de la première lecture, en jours. */
+      lookbackDays: z.number().int().min(1).max(180),
+      /** Importer aussi les alertes d'offres reçues par email. */
+      importAlerts: z.boolean(),
+    }),
+    default: { clientId: '', account: '', canRead: false, canCompose: false, connectedAt: '', allowSend: false, lookbackDays: 30, importAlerts: true },
+  },
   'notifications.channels': {
     schema: z.object({
       email: Channel.extend({ to: z.string().default('') }),
