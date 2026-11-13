@@ -1,0 +1,56 @@
+# JobAgent en production sur une machine ou un petit serveur virtuel.
+#   docker compose up -d --build
+# Variables attendues dans un fichier .env placé à côté de ce fichier (voir .env.example) :
+#   POSTGRES_PASSWORD, APP_SECRET, APP_URL, SETUP_TOKEN — et DOMAIN pour le profil « https ».
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jobagent
+      POSTGRES_USER: jobagent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?définir POSTGRES_PASSWORD dans .env}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobagent -d jobagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://jobagent:${POSTGRES_PASSWORD}@db:5432/jobagent
+      APP_SECRET: ${APP_SECRET:?définir APP_SECRET dans .env (openssl rand -base64 48)}
+      APP_URL: ${APP_URL:?définir APP_URL dans .env (adresse publique, https://…)}
+      SETUP_TOKEN: ${SETUP_TOKEN:?définir SETUP_TOKEN dans .env}
+      CRON_SECRET: ${CRON_SECRET:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      # Lié à la machine seulement : l'accès public passe par le proxy HTTPS ci-dessous (ou le vôtre).
+      - "127.0.0.1:4000:4000"
+
+  # HTTPS automatique (Let's Encrypt). Activer avec : docker compose --profile https up -d
+  # Le nom de domaine DOMAIN doit pointer vers cette machine ; ports 80 et 443 ouverts.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [app]
+    command: caddy reverse-proxy --from ${DOMAIN:-localhost} --to app:4000
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy:/data
+
+volumes:
+  db:
+  caddy:

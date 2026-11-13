@@ -1,0 +1,15 @@
+node_modules
+dist
+data
+private
+.env
+.env.*
+!.env.example
+.git
+tests
+docs
+*.log
+backups
+test-results
+playwright-report
+coverage

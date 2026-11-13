@@ -61,21 +61,6 @@ export const SETTINGS = {
     schema: z.object({ enabled: z.boolean(), intervalMinutes: z.number().int().min(5).max(1440) }),
     default: { enabled: false, intervalMinutes: 30 },
   },
-  'email.imap': {
-    schema: z.object({
-      host: z.string(),
-      port: z.number().int(),
-      secure: z.boolean(),
-      user: z.string(),
-      folder: z.string(),
-      alertFolders: z.array(z.string()),
-    }),
-    default: { host: '', port: 993, secure: true, user: '', folder: 'INBOX', alertFolders: [] as string[] },
-  },
-  'email.smtp': {
-    schema: z.object({ host: z.string(), port: z.number().int(), secure: z.boolean(), user: z.string(), from: z.string() }),
-    default: { host: '', port: 465, secure: true, user: '', from: '' },
-  },
   /** Connexion Gmail par OAuth. Lecture et rédaction sont deux autorisations distinctes ; l'envoi reste désactivé par défaut. */
   'email.gmail': {
     schema: z.object({

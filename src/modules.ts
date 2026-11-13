@@ -11,6 +11,7 @@ import { jobsRoutes } from './api/routes/jobs.js';
 import { applicationsRoutes } from './api/routes/applications.js';
 import { searchRoutes } from './api/routes/search.js';
 import { mailRoutes } from './api/routes/mail.js';
+import { cronRoutes } from './api/routes/cron.js';
 import './docs/index.js';
 import './profile/index.js';
 import './pipeline/index.js';
@@ -18,6 +19,7 @@ import './search/index.js';
 import './tracker/index.js';
 import './notify/index.js';
 
+registerRoutes('public', (app, deps) => app.route('/cron', cronRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/profile', profileRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/files', filesRoutes(deps)));

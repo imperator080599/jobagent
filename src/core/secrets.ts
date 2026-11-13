@@ -7,13 +7,10 @@ import { decryptSecret, encryptSecret, secretHint } from './crypto.js';
 
 export const SECRET_KEYS = [
   'anthropic_api_key',
-  'imap_password',
-  'smtp_password',
   'telegram_bot_token',
   'linkedin_access_token',
   'adzuna_app_key',
   'francetravail_client_secret',
-  'jooble_api_key',
   'webhook_secret',
   'google_client_secret',
   'gmail_refresh_token',
