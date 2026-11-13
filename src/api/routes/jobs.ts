@@ -1,6 +1,7 @@
 // Offres : liste, fiche, ajout manuel, contrôle des doublons, statut.
 import { and, asc, desc, eq, gte, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
+import { sha256 } from '../../core/crypto.js';
 import { logActivity } from '../../core/activity.js';
 import { badRequest, conflict, HttpError } from '../../core/errors.js';
 import { resolveAction } from '../../core/inbox.js';
@@ -193,7 +194,31 @@ export function jobsRoutes(deps: AppDeps) {
       ctx.db.select().from(applications).where(and(eq(applications.jobId, job.id), eq(applications.userId, uctx.userId))),
       ctx.db.select().from(actionItems).where(and(eq(actionItems.jobId, job.id), eq(actionItems.userId, uctx.userId), inArray(actionItems.status, ['open', 'snoozed']))),
     ]);
-    return c.json({ job, sightings, history, analyses, cvVersions: cvs, letters: lets, application: application ?? null, actions: todo });
+    // Le message exact envoyé au modèle est volumineux : il est servi à part (/jobs/:id/ats/:analysisId/request).
+    const light = analyses.map(({ requestText, ...a }) => ({ ...a, requestChars: requestText.length }));
+    return c.json({ job, sightings, history, analyses: light, cvVersions: cvs, letters: lets, application: application ?? null, actions: todo });
+  });
+
+  /** Message exact transmis au modèle pour une analyse ATS (prompt + CV + offre), avec son empreinte. */
+  r.get('/:id/ats/:analysisId/request', async (c) => {
+    const uctx = c.get('uctx');
+    const [a] = await ctx.db
+      .select({ requestText: atsAnalyses.requestText, integrity: atsAnalyses.integrity, createdAt: atsAnalyses.createdAt })
+      .from(atsAnalyses)
+      .where(and(eq(atsAnalyses.id, c.req.param('analysisId')), eq(atsAnalyses.jobId, c.req.param('id')), eq(atsAnalyses.userId, uctx.userId)));
+    if (!a) return c.json({ error: { code: 'not_found', message: 'Analyse introuvable.' } }, 404);
+    if (!a.requestText) return c.json({ error: { code: 'not_recorded', message: "Cette analyse est antérieure à l'enregistrement du message exact : seule l'empreinte du prompt utilisé est connue." } }, 404);
+    const data = new TextEncoder().encode(a.requestText);
+    return new Response(data, {
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'content-disposition': `${c.req.query('download') === '1' ? 'attachment' : 'inline'}; filename="requete-ats-${c.req.param('analysisId')}.txt"`,
+        'x-content-sha256': sha256(data),
+        'x-recorded-sha256': String((a.integrity as { requestSha256?: string } | null)?.requestSha256 ?? ''),
+        'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
+      },
+    });
   });
 
   r.patch('/:id', sessionOnly, async (c) => {

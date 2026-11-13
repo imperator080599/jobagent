@@ -46,7 +46,7 @@ async function resolveProvider(ctx: UserContext): Promise<LlmProvider> {
   if (ctx.env.llmProvider === 'mock') return createMockProvider();
   const key = (await getSecret(ctx.db, ctx.env.appSecret, ctx.userId, 'anthropic_api_key')) ?? ctx.env.anthropicApiKey;
   if (!key) throw new ConfigError("Aucune clé d'API Anthropic n'est configurée (Paramètres → IA et budget).", 'llm_key_missing');
-  return createAnthropicProvider(key);
+  return createAnthropicProvider(key, { fetch: ctx.fetch });
 }
 
 export async function getLlm(ctx: UserContext): Promise<Llm> {

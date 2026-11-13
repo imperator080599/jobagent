@@ -8,6 +8,7 @@ import { newId } from '../db/ids.js';
 import { logActivity } from '../core/activity.js';
 import { sha256 } from '../core/crypto.js';
 import { badRequest, notFound } from '../core/errors.js';
+import { comparePrompts } from '../pipeline/ats-integrity.js';
 import { resolveAction } from '../core/inbox.js';
 
 export type AtsPrompt = typeof atsPrompts.$inferSelect;
@@ -108,4 +109,65 @@ export async function activateAtsPrompt(ctx: UserContext, id: string): Promise<A
 export async function ensureDefaultAtsPrompt(db: Db, userId: string): Promise<void> {
   const [any] = await db.select({ id: atsPrompts.id }).from(atsPrompts).where(eq(atsPrompts.userId, userId)).limit(1);
   if (!any) await insertVersion(db, userId, DEFAULT_ATS_PROMPT, 'Prompt par défaut fourni avec JobAgent', true);
+}
+
+export interface DecodedPromptFile {
+  text: string;
+  /** Empreinte des octets du fichier. Égale à celle du texte lorsque le fichier est en UTF-8 : aucun octet n'a été changé. */
+  fileSha256: string;
+  textSha256: string;
+  encoding: 'utf-8' | 'utf-16le' | 'utf-16be' | 'docx';
+  /** Le texte enregistré est-il la reproduction exacte des octets du fichier ? */
+  byteExact: boolean;
+  bom: boolean;
+  notes: string[];
+}
+
+/**
+ * Lit un fichier de prompt sans rien normaliser : ni retours à la ligne, ni espaces, ni
+ * marque d'ordre des octets (BOM). Un fichier qui n'est pas en UTF-8 valide est refusé
+ * plutôt que deviné ; un document Word est accepté, mais signalé comme texte extrait.
+ */
+export async function decodePromptFile(file: { filename: string; mime: string; data: Uint8Array }): Promise<DecodedPromptFile> {
+  const bytes = file.data;
+  const fileSha256 = sha256(bytes);
+  const notes: string[] = [];
+  const lower = file.filename.toLowerCase();
+  if (lower.endsWith('.docx') || file.mime.includes('wordprocessingml')) {
+    const { extractDocumentText } = await import('./extract.js');
+    const doc = await extractDocumentText(file);
+    notes.push("Texte extrait d'un document Word : la mise en forme et certains retours à la ligne peuvent différer de ce que vous voyez dans Word. Pour une preuve octet par octet, enregistrez le prompt en texte brut UTF-8 (.txt).");
+    return { text: doc.text, fileSha256, textSha256: sha256(doc.text), encoding: 'docx', byteExact: false, bom: false, notes };
+  }
+  if (bytes.length >= 2 && ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))) {
+    const encoding = bytes[0] === 0xff ? 'utf-16le' : 'utf-16be';
+    const text = new TextDecoder(encoding, { fatal: true }).decode(bytes);
+    notes.push(`Fichier en ${encoding.toUpperCase()} : le texte est identique, mais il est enregistré en UTF-8. Comparez les empreintes du texte, pas celles du fichier.`);
+    return { text, fileSha256, textSha256: sha256(text), encoding, byteExact: false, bom: true, notes };
+  }
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    throw badRequest("Ce fichier n'est pas encodé en UTF-8. Enregistrez-le en « Texte brut UTF-8 » (ou collez le prompt) : JobAgent ne devine pas un encodage, pour ne modifier aucun caractère.");
+  }
+  const bom = text.startsWith('\uFEFF');
+  if (bom) notes.push("Le fichier commence par une marque d'ordre des octets (BOM) : elle est conservée telle quelle.");
+  if (/\r\n/.test(text)) notes.push('Le fichier utilise des fins de ligne Windows (CRLF) : elles sont conservées telles quelles.');
+  const textSha256 = sha256(text);
+  return { text, fileSha256, textSha256, encoding: 'utf-8', byteExact: textSha256 === fileSha256, bom, notes };
+}
+
+/** Compare un texte de référence (par ex. le fichier d'origine de l'utilisateur) à une version enregistrée. */
+export async function compareAtsPrompt(ctx: UserContext, reference: string, versionId?: string) {
+  const target = versionId ? await getAtsPrompt(ctx.db, ctx.userId, versionId) : await getActiveAtsPrompt(ctx.db, ctx.userId);
+  if (!target) throw notFound('Aucune version du prompt ATS à comparer.');
+  const result = comparePrompts(reference, target.content);
+  return {
+    version: { id: target.id, version: target.version, sha256: target.sha256, chars: target.content.length, storedShaValid: sha256(target.content) === target.sha256 },
+    reference: { sha256: result.referenceSha256, chars: reference.length },
+    identical: result.identical,
+    lineEndingsOnly: result.lineEndingsOnly,
+    differences: result.differences,
+  };
 }

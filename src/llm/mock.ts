@@ -2,6 +2,7 @@
 // automatisés et au mode démonstration. Chaque agent enregistre ici sa propre
 // simulation, à côté de son prompt.
 import type { LlmJsonRequest, LlmProvider, LlmRequest } from './types.js';
+import { sha256 } from '../core/crypto.js';
 
 export type MockHandler = (req: LlmRequest) => unknown | Promise<unknown>;
 
@@ -44,14 +45,17 @@ export function createMockProvider(): LlmProvider {
     name: 'mock',
     async text(req) {
       const out = await run(req);
-      const text = typeof out === 'string' ? out : JSON.stringify(out);
+      // Une simulation peut rendre { text, stopReason } pour reproduire une sortie interrompue.
+      const shaped = out && typeof out === 'object' && typeof (out as { text?: unknown }).text === 'string' && typeof (out as { stopReason?: unknown }).stopReason === 'string' ? (out as { text: string; stopReason: string }) : null;
+      const text = shaped ? shaped.text : typeof out === 'string' ? out : JSON.stringify(out);
       return {
         text,
         model: 'mock',
         provider: 'mock',
         usage: { inputTokens: approxTokens((req.system ?? '') + (req.prefix ?? '') + req.prompt), outputTokens: approxTokens(text), cacheReadTokens: 0, cacheWriteTokens: 0 },
-        stopReason: 'end_turn',
+        stopReason: shaped ? shaped.stopReason : 'end_turn',
         refused: false,
+        sent: { sha256: sha256(`${req.prefix ? `${req.prefix}\n\n` : ''}${req.prompt}`), chars: (req.prefix ? req.prefix.length + 2 : 0) + req.prompt.length, source: 'mock', systemSha256: sha256(req.system ?? ''), documents: (req.documents ?? []).map((d) => ({ mediaType: d.mediaType, sha256: sha256(d.data), bytes: d.data.byteLength })) },
       };
     },
     async json<T>(req: LlmJsonRequest<T>) {

@@ -7,8 +7,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { ConfigError } from '../core/errors.js';
+import { sha256 } from '../core/crypto.js';
 import type { Usage } from './pricing.js';
-import type { LlmJsonRequest, LlmProvider, LlmRequest } from './types.js';
+import type { LlmJsonRequest, LlmProvider, LlmRequest, SentReceipt } from './types.js';
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
@@ -50,19 +51,60 @@ function mapError(err: unknown): never {
   throw err;
 }
 
-export function createAnthropicProvider(apiKey: string): LlmProvider {
-  const client = new Anthropic({ apiKey, maxRetries: 2 });
+function bodyText(body: unknown): string | null {
+  if (typeof body === 'string') return body;
+  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+  if (body instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(body));
+  return null;
+}
+
+/**
+ * Empreintes calculées sur le corps HTTP réellement envoyé à l'API (et non sur les paramètres préparés) :
+ * texte du message, consigne système et octets des documents joints.
+ */
+export function receiptFromBody(body: string): SentReceipt | null {
+  try {
+    const json = JSON.parse(body) as { system?: unknown; messages?: { content?: unknown }[] };
+    const content = json.messages?.[0]?.content;
+    const blocks = (Array.isArray(content) ? content : typeof content === 'string' ? [{ type: 'text', text: content }] : []) as { type: string; text?: string; source?: { data?: string; media_type?: string } }[];
+    const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
+    const system = typeof json.system === 'string' ? json.system : Array.isArray(json.system) ? (json.system as { text?: string }[]).map((b) => b.text ?? '').join('') : '';
+    const documents = blocks
+      .filter((b) => b.type === 'document')
+      .map((b) => {
+        const bytes = Buffer.from(b.source?.data ?? '', 'base64');
+        return { mediaType: b.source?.media_type ?? '', sha256: sha256(new Uint8Array(bytes)), bytes: bytes.byteLength };
+      });
+    return { sha256: sha256(text), chars: text.length, source: 'http_body', systemSha256: sha256(system), documents };
+  } catch {
+    return null;
+  }
+}
+
+export function createAnthropicProvider(apiKey: string, opts: { fetch?: typeof fetch } = {}): LlmProvider {
+  const baseFetch = opts.fetch ?? globalThis.fetch;
+  const client = new Anthropic({ apiKey, maxRetries: 2, fetch: baseFetch as never });
   return {
     name: 'anthropic',
     async text(req, model) {
       try {
-        const stream = client.beta.messages.stream(buildParams(req, model, req.maxTokens ?? 32_000));
+        const params = buildParams(req, model, req.maxTokens ?? 32_000);
+        // Client propre à l'appel : le corps HTTP réellement envoyé est relevé au passage, pour en prendre l'empreinte.
+        let captured: string | null = null;
+        const spy = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+          if (url.includes('/v1/messages')) captured = bodyText(init?.body) ?? captured;
+          return baseFetch(input, init);
+        }) as typeof fetch;
+        const callClient = new Anthropic({ apiKey, maxRetries: 2, fetch: spy as never });
+        const stream = callClient.beta.messages.stream(params);
         const message = await stream.finalMessage();
         const text = message.content
           .filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')
           .map((b) => b.text)
           .join('');
-        return { text, model: message.model, provider: 'anthropic', usage: usageOf(message.usage), stopReason: message.stop_reason ?? '', refused: message.stop_reason === 'refusal' };
+        const sent = captured ? receiptFromBody(captured) : null;
+        return { text, model: message.model, provider: 'anthropic', usage: usageOf(message.usage), stopReason: message.stop_reason ?? '', refused: message.stop_reason === 'refusal', ...(sent ? { sent } : {}) };
       } catch (err) {
         mapError(err);
       }

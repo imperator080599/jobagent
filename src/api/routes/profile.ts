@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { badRequest } from '../../core/errors.js';
 import { getFile } from '../../core/files.js';
-import { activateAtsPrompt, getActiveAtsPrompt, listAtsPrompts, saveAtsPrompt } from '../../profile/ats-prompt.js';
+import { activateAtsPrompt, compareAtsPrompt, decodePromptFile, getActiveAtsPrompt, getAtsPrompt, listAtsPrompts, saveAtsPrompt } from '../../profile/ats-prompt.js';
+import { sha256 } from '../../core/crypto.js';
 import { deleteAnswer, listAnswers, updateAnswer, upsertAnswer } from '../../profile/answers.js';
 import { approveCv, deleteCvDraft, diffCv, forkCv, getCv, importCv, listCurrentMasters, listCvVersions, updateCvDraft } from '../../profile/cv.js';
 import { factHistory, listFacts, missingImportantFacts, resolveProposedFact, setFact, setSkillFact } from '../../profile/facts.js';
@@ -161,6 +162,56 @@ export function profileRoutes(deps: AppDeps) {
   });
 
   r.post('/ats-prompt/:id/activate', sessionOnly, async (c) => c.json({ prompt: await activateAtsPrompt(c.get('uctx'), c.req.param('id')) }));
+
+  /** Import du prompt depuis le fichier d'origine : les octets sont conservés tels quels (aucune normalisation). */
+  r.post('/ats-prompt/import', sessionOnly, async (c) => {
+    const file = await uploadedFile(c);
+    if (file.data.byteLength > 400_000) throw badRequest('Fichier trop volumineux pour un prompt (400 Ko maximum).');
+    const decoded = await decodePromptFile(file);
+    const res = await saveAtsPrompt(c.get('uctx'), decoded.text, `Importé du fichier « ${file.filename.slice(0, 120)} »`);
+    return c.json({ ...res, file: { name: file.filename, sha256: decoded.fileSha256, bytes: file.data.byteLength }, textSha256: decoded.textSha256, storedSha256: res.prompt.sha256, byteExact: decoded.byteExact, identicalToFile: decoded.byteExact && res.prompt.sha256 === decoded.fileSha256, encoding: decoded.encoding, notes: decoded.notes });
+  });
+
+  /** Compare un texte (collé ou fichier) à une version enregistrée, caractère par caractère. */
+  r.post('/ats-prompt/compare', sessionOnly, async (c) => {
+    const type = c.req.header('content-type') ?? '';
+    let reference: string;
+    let notes: string[] = [];
+    let fileSha256: string | null = null;
+    let versionId: string | undefined;
+    if (type.includes('multipart/form-data')) {
+      const form = await c.req.parseBody();
+      versionId = typeof form.versionId === 'string' && form.versionId ? form.versionId : undefined;
+      const f = form.file;
+      if (!(f instanceof File)) throw badRequest('Aucun fichier reçu.');
+      const decoded = await decodePromptFile({ filename: f.name || 'prompt.txt', mime: f.type || '', data: new Uint8Array(await f.arrayBuffer()) });
+      reference = decoded.text;
+      notes = decoded.notes;
+      fileSha256 = decoded.fileSha256;
+    } else {
+      const input = await body(c, z.object({ content: z.string().min(1).max(400_000), versionId: z.string().optional() }));
+      reference = input.content;
+      versionId = input.versionId;
+      notes = ["Texte collé : un navigateur peut convertir les fins de ligne ou certains espaces lors du copier-coller. Pour une preuve octet par octet, comparez avec le fichier d'origine."];
+    }
+    return c.json({ ...(await compareAtsPrompt(c.get('uctx'), reference, versionId)), fileSha256, notes });
+  });
+
+  /** Texte exact d'une version, tel qu'enregistré (pour le télécharger et calculer soi-même son empreinte). */
+  r.get('/ats-prompt/:id/raw', async (c) => {
+    const v = await getAtsPrompt(ctx.db, c.get('user').id, c.req.param('id'));
+    const data = new TextEncoder().encode(v.content);
+    return new Response(data, {
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+        'content-disposition': `attachment; filename="prompt-ats-v${v.version}.txt"`,
+        'x-content-sha256': sha256(data),
+        'x-stored-sha256': v.sha256,
+        'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
+      },
+    });
+  });
 
   return r;
 }

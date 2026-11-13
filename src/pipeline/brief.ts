@@ -131,6 +131,47 @@ export function profileBlock(brief: CandidateBrief): string {
   return parts.join('\n\n');
 }
 
+export interface CvDocument {
+  /** Texte du document évalué, tel qu'extrait du fichier (et non reconstitué à partir des données structurées). */
+  text: string;
+  source: 'document_pdf' | 'document_docx' | 'document_text' | 'structured';
+  /** Fichier PDF joint au modèle pour qu'il juge le format réel. */
+  pdf: Uint8Array | null;
+  pdfSha256: string | null;
+  pages: number;
+  fileId: string | null;
+}
+
+/**
+ * Le CV « complet » d'une version : pour un master, le fichier importé par l'utilisateur ; pour un CV
+ * personnalisé, le PDF effectivement produit. Le texte vient du document lui-même. La reconstitution
+ * à partir des données structurées n'est utilisée qu'en dernier recours, et elle est alors signalée.
+ */
+export async function cvDocument(ctx: UserContext, cv: CvVersion): Promise<CvDocument> {
+  const { extractDocumentText, sniffKind } = await import('../profile/extract.js');
+  const { sha256 } = await import('../core/crypto.js');
+  const ids = cv.kind === 'master' ? [cv.sourceFileId, cv.pdfFileId] : [cv.pdfFileId];
+  for (const id of ids) {
+    if (!id) continue;
+    const f = await getFile(ctx.db, ctx.userId, id);
+    if (!f) continue;
+    const kind = sniffKind(f.filename, f.mime, f.data);
+    if (!kind) continue;
+    const doc = await extractDocumentText({ filename: f.filename, mime: f.mime, data: f.data });
+    if (doc.text.trim().length < 80) continue;
+    const isPdf = kind === 'pdf';
+    return {
+      text: doc.text,
+      source: isPdf ? 'document_pdf' : kind === 'docx' ? 'document_docx' : 'document_text',
+      pdf: isPdf && f.data.byteLength < 4_500_000 ? f.data : null,
+      pdfSha256: isPdf ? sha256(f.data) : null,
+      pages: doc.pages || 1,
+      fileId: f.id,
+    };
+  }
+  return { text: cvToText(cv.data), source: 'structured', pdf: null, pdfSha256: null, pages: 1, fileId: null };
+}
+
 /** PDF à joindre pour qu'un modèle évalue le format réel du CV : le fichier d'origine d'un master, le PDF généré sinon. */
 export async function cvPdf(ctx: UserContext, cv: CvVersion): Promise<Uint8Array | null> {
   const ids = cv.kind === 'master' ? [cv.sourceFileId, cv.pdfFileId] : [cv.pdfFileId];

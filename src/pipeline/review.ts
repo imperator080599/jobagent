@@ -89,6 +89,7 @@ export async function afterAnalysis(ctx: UserContext, job: Job, r: AtsRunResult,
     body: {
       analysisId: r.analysis.id,
       score,
+      projected: r.parsed.projected20 ?? null,
       decision: r.decision,
       summary: r.parsed.summary || q.summary || '',
       relevance: job.relevanceScore,
@@ -172,8 +173,11 @@ export async function submitReview(ctx: UserContext, jobId: string, input: Revie
   }
 
   if (input.decision === 'reanalyze') {
-    if (job.stage !== 'to_analyze') await setStage(ctx, job.id, 'to_analyze', { actor: 'user', reason: added ? 'nouvelle analyse avec vos précisions' : 'nouvelle analyse demandée', soft: true });
-    await enqueue(ctx.db, { type: 'job.ats', userId: ctx.userId, payload: { jobId: job.id, manual: true, force: true }, idempotencyKey: `job.ats:${job.id}`, priority: 90, runAfter: ctx.now() });
+    // La note ATS porte sur le document CV : des précisions ne la changent pas et ne sont jamais ajoutées au CV noté.
+    // Elles mettent à jour l'adéquation et les questions, puis serviront au CV personnalisé, noté à son tour par le même prompt.
+    // Sans précision nouvelle, l'utilisateur demande une nouvelle exécution du prompt.
+    if (job.stage !== 'to_analyze') await setStage(ctx, job.id, 'to_analyze', { actor: 'user', reason: added ? 'réévaluation avec vos précisions' : 'nouvelle analyse demandée', soft: true });
+    await enqueue(ctx.db, { type: 'job.ats', userId: ctx.userId, payload: { jobId: job.id, manual: true, force: !added, requalify: added > 0 }, idempotencyKey: `job.ats:${job.id}`, priority: 90, runAfter: ctx.now() });
     return getJob(ctx, job.id);
   }
 

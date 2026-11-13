@@ -34,8 +34,22 @@ export interface LlmMeta {
   durationMs: number;
 }
 
+/** Ce que le fournisseur a effectivement transmis pour le message (empreintes calculées sur ce qui part réellement). */
+export interface SentReceipt {
+  /** Empreinte du texte du message (blocs texte, dans l'ordre). */
+  sha256: string;
+  chars: number;
+  /** Où l'empreinte a été prise : corps HTTP réellement envoyé à l'API, entrée standard de Claude Code, ou simulation. */
+  source: 'http_body' | 'stdin' | 'mock';
+  /** Empreinte de la consigne système transmise. */
+  systemSha256?: string;
+  /** Documents joints tels que transmis (octets décodés du corps de la requête). */
+  documents?: { mediaType: string; sha256: string; bytes: number }[];
+}
+
 export interface LlmTextResult extends LlmMeta {
   text: string;
+  sent?: SentReceipt;
 }
 
 export interface LlmJsonResult<T> extends LlmMeta {

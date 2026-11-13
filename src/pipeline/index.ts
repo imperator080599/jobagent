@@ -17,11 +17,11 @@ import { tailorCv } from '../writer/tailor.js';
 import { writeLetter } from '../writer/letter.js';
 import { latestAnalysis, runAtsAnalysis, type AtsParsed } from './ats.js';
 import { masterFor } from './brief.js';
-import { runQualification } from './qualify.js';
+import { refreshQualification, runQualification } from './qualify.js';
 import { afterAnalysis } from './review.js';
 import { registerTaskHandler } from './worker.js';
 
-const payloadOf = (p: unknown) => (p ?? {}) as { jobId?: string; manual?: boolean; force?: boolean; thenTailor?: boolean; instructions?: string };
+const payloadOf = (p: unknown) => (p ?? {}) as { jobId?: string; manual?: boolean; force?: boolean; thenTailor?: boolean; requalify?: boolean; instructions?: string };
 
 /** Signale à l'utilisateur ce qui manque avant de laisser la tâche en attente. */
 async function explain(ctx: UserContext, err: unknown) {
@@ -79,7 +79,8 @@ registerTaskHandler('job.ats', async (ctx, task) => {
   const job = await getJob(ctx, p.jobId);
   if (!['to_analyze', 'analyzed', 'awaiting_feedback'].includes(job.stage)) return { skipped: `statut ${job.stage}` };
   try {
-    const full = await ensureFullText(ctx, job);
+    let full = await ensureFullText(ctx, job);
+    if (p.requalify) full = await refreshQualification(ctx, full);
     const result = await runAtsAnalysis(ctx, { job: full, force: p.force });
     // Analyse identique déjà faite et déjà présentée : rien ne change, rien n'est rejoué.
     if (result.reused && job.latestAnalysisId === result.analysis.id && job.stage !== 'to_analyze' && !p.thenTailor) return { score: result.parsed.total20, decision: result.decision, route: 'unchanged', reused: true };
@@ -93,9 +94,22 @@ registerTaskHandler('job.ats', async (ctx, task) => {
     return { score: result.parsed.total20, decision: result.decision, route: next.route, reused: result.reused };
   } catch (err) {
     await explain(ctx, err);
+    await explainAts(ctx, job, err);
     throw err;
   }
 });
+
+const ATS_PROBLEMS: Record<string, string> = {
+  ats_prompt_integrity: "Votre prompt ATS n'a pas pu être transmis à l'identique : l'analyse n'a pas été lancée. Vérifiez la version active (Profil → Prompt ATS), puis relancez.",
+  ats_input_too_large: "Le prompt, le CV et l'annonce dépassent ce que le modèle peut lire en une fois. Rien n'a été coupé : l'analyse attend votre décision.",
+  ats_unusable: "Le rapport ATS est incomplet ou n'a pas été transmis tel quel : il est conservé, mais aucune décision n'a été prise à partir de lui. Relancez l'analyse.",
+};
+
+/** Les problèmes d'analyse ATS apparaissent dans le centre de validation, avec leur cause exacte. */
+async function explainAts(ctx: UserContext, job: Job, err: unknown) {
+  if (!(err instanceof NeedsHumanError) || !ATS_PROBLEMS[err.reason]) return;
+  await raiseAction(ctx.db, { userId: ctx.userId, type: 'job.ats_problem', title: `Analyse ATS à vérifier : ${job.companyName} — ${job.title}`, body: { text: ATS_PROBLEMS[err.reason], detail: err.message, link: `/offres/${job.id}` }, jobId: job.id, priority: 75, dedupKey: `job.ats_problem:${job.id}`, reopen: true });
+}
 
 registerTaskHandler('job.tailor', async (ctx, task) => {
   const p = payloadOf(task.payload);

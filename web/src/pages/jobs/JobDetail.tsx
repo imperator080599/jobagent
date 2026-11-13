@@ -1,10 +1,10 @@
 // Fiche d'une offre : notes, analyse ATS (synthèse et rapport intégral), documents
 // de candidature, annonce, historique. Les actions proposées dépendent de l'étape.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, CircleAlert, Copy, Download, ExternalLink, FileText, RefreshCw, Send, ShieldAlert, Sparkles, Star, ThumbsDown, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowLeft, Check, CircleAlert, Copy, Download, ExternalLink, FileText, RefreshCw, Send, ShieldAlert, ShieldCheck, Sparkles, Star, ThumbsDown, Trash2 } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { STAGE_LABELS, type Stage } from '../../../../src/shared/stages';
+import { ATS_DECISION_LABELS, STAGE_LABELS, type AtsDecision, type Stage } from '../../../../src/shared/stages';
 import { Alert, Badge, Button, Card, CardHeader, Field, IconButton, Loading, Modal, Tabs, Textarea, useToast } from '../../components/ui';
 import { del, get, patch, post } from '../../lib/api';
 import { cx, formatDate, relativeTime } from '../../lib/format';
@@ -16,7 +16,7 @@ interface Detail {
   job: Job;
   sightings: { id: string; url: string; firstSeenAt: string; lastSeenAt: string; goneAt: string | null; sourceName: string | null; sourceType: string | null }[];
   history: { id: string; fromStage: string; toStage: string; actor: string; reason: string; at: string }[];
-  analyses: { id: string; cvVersionId: string; score: number | null; decision: string; rawOutput: string; parsed: any; model: string; createdAt: string; userNote: string }[];
+  analyses: { id: string; cvVersionId: string; score: number | null; projectedScore: number | null; decision: string; status: string; rawOutput: string; parsed: any; integrity: any; promptSha: string; requestChars: number; model: string; createdAt: string; userNote: string }[];
   cvVersions: { id: string; label: string; status: string; version: number; changeSummary: string; checks: any; pdfFileId: string | null; docxFileId: string | null; createdAt: string }[];
   letters: { id: string; status: string; language: string; text: string; checks: any; pdfFileId: string | null; docxFileId: string | null; createdAt: string }[];
   application: any | null;
@@ -65,6 +65,77 @@ function RenderChecks({ render }: { render?: { ok?: boolean | null; checks?: { i
           </li>
         ))}
       </ul>
+    </details>
+  );
+}
+
+const fmt20 = (n: number | null | undefined) => (n == null ? '—' : `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })}/20`);
+const CV_SOURCES: Record<string, string> = { document_pdf: 'texte extrait de votre PDF', document_docx: 'texte extrait de votre document Word', document_text: 'texte de votre fichier', structured: 'reconstitué à partir des données du CV (aucun document lisible)' };
+const SENT_SOURCES: Record<string, string> = { http_body: "corps de la requête HTTP réellement envoyée à l'API", stdin: "texte écrit sur l'entrée de Claude Code", mock: 'simulation (tests)' };
+
+/** Trois informations distinctes, jamais confondues : la note attribuée, l'estimation du rapport, la recommandation. */
+function AtsScores({ analysis, tailoredAfter }: { analysis: Detail['analyses'][number]; tailoredAfter: number | null }) {
+  const usable = analysis.status === 'ok';
+  return (
+    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div className="rounded-lg bg-slate-50 p-3">
+        <p className="text-[11.5px] text-slate-500">Note attribuée par votre prompt</p>
+        <p className="mt-0.5 text-lg font-semibold text-slate-900 tabular-nums">{usable ? fmt20(analysis.score) : '—'}</p>
+        <p className="text-[11px] text-slate-400">Lue dans le rapport ci-dessous</p>
+      </div>
+      <div className="rounded-lg bg-slate-50 p-3">
+        <p className="text-[11.5px] text-slate-500">Note estimée après optimisation</p>
+        <p className="mt-0.5 text-lg font-semibold text-slate-500 tabular-nums">{fmt20(analysis.projectedScore)}</p>
+        <p className="text-[11px] text-slate-400">{analysis.projectedScore != null ? 'Projection du rapport, non mesurée' : 'Le rapport n’en donne pas'}{tailoredAfter != null ? ` · mesurée sur le CV personnalisé : ${fmt20(tailoredAfter)}` : ''}</p>
+      </div>
+      <div className="rounded-lg bg-slate-50 p-3">
+        <p className="text-[11.5px] text-slate-500">Recommandation JobAgent</p>
+        <p className="mt-0.5 text-[14px] font-semibold text-slate-900">{usable && analysis.decision ? ATS_DECISION_LABELS[analysis.decision as AtsDecision] : 'Aucune'}</p>
+        <p className="text-[11px] text-slate-400">{usable ? 'Selon vos seuils, à partir de la note attribuée' : 'Pas de décision sur un rapport inutilisable'}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Preuve d'intégrité enregistrée avec l'analyse : ce qui a été transmis, et comment cela a été vérifié. */
+function IntegrityPanel({ jobId, analysis }: { jobId: string; analysis: Detail['analyses'][number] }) {
+  const i = analysis.integrity;
+  if (!i) {
+    return (
+      <p className="mt-3 text-[12px] text-slate-500">
+        Analyse antérieure à l'enregistrement de la preuve d'intégrité : seule l'empreinte du prompt utilisé est connue (<span className="font-mono break-all">SHA-256 {analysis.promptSha}</span>).
+      </p>
+    );
+  }
+  const row = (ok: boolean | null, label: ReactNode, detail?: ReactNode) => (
+    <li className="flex gap-2">
+      {ok === false ? <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-rose-600" /> : <Check className={cx('mt-0.5 size-3.5 shrink-0', ok ? 'text-emerald-600' : 'text-slate-400')} />}
+      <span>
+        {label}
+        {detail && <span className="block font-mono text-[11px] break-all text-slate-400">{detail}</span>}
+      </span>
+    </li>
+  );
+  return (
+    <details className={cx('mt-3 rounded-lg p-3 text-[12.5px]', i.ok ? 'bg-emerald-50 text-emerald-900' : 'bg-rose-50 text-rose-900')}>
+      <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
+        <ShieldCheck className="size-4" /> {i.ok ? 'Prompt transmis à l’identique : vérifié' : 'Intégrité non garantie pour cette analyse'}
+      </summary>
+      <ul className="mt-2 space-y-1.5 text-slate-700">
+        {row(i.promptSha256 === i.promptStoredSha256 && i.reconstructedSha256 === i.promptSha256, `Prompt enregistré relu et reconstitué depuis le message envoyé : identique (${i.promptChars.toLocaleString('fr-FR')} caractères)`, `SHA-256 ${i.promptSha256}`)}
+        {row(
+          i.transmitted ? i.transmitted.matches : null,
+          i.transmitted ? `Message vérifié sur le ${SENT_SOURCES[i.transmitted.source] ?? i.transmitted.source}` : 'Transmission non vérifiable avec ce fournisseur',
+          `SHA-256 ${i.requestSha256} · ${i.requestChars.toLocaleString('fr-FR')} caractères`,
+        )}
+        {row(true, `CV : ${CV_SOURCES[i.cv.source] ?? i.cv.source} (${i.cv.chars.toLocaleString('fr-FR')} caractères)${i.cv.pdfAttached ? ', PDF joint' : ', PDF non joint (fournisseur sans pièce jointe)'}`)}
+        {i.offer && row(i.offer.complete, `Offre complète transmise (${i.offer.chars.toLocaleString('fr-FR')} caractères), encadrée comme donnée externe`)}
+        {i.output && row(i.output.complete, i.output.complete ? `Rapport complet (${i.output.attempts > 1 ? `${i.output.attempts} essais` : 'premier essai'})` : `Rapport interrompu à ${i.output.maxTokens} jetons après ${i.output.attempts} essai(s)`)}
+        {(i.problems ?? []).map((p: string) => row(false, p))}
+      </ul>
+      <a className="mt-2 inline-flex items-center gap-1 text-[12.5px] font-medium text-indigo-700 hover:underline" href={`/api/jobs/${jobId}/ats/${analysis.id}/request`} target="_blank" rel="noreferrer">
+        <ExternalLink className="size-3.5" /> Voir le message exact envoyé au modèle
+      </a>
     </details>
   );
 }
@@ -265,8 +336,11 @@ export function JobDetail({ id }: { id: string }) {
                     ) : undefined
                   }
                 />
+                <AtsScores analysis={analysis} tailoredAfter={d.cvVersions.find((c) => c.checks?.ats?.after != null)?.checks?.ats?.after ?? null} />
+                {analysis.status === 'incomplete' && <div className="mt-3"><Alert tone="warning">Le rapport a été interrompu avant sa fin, malgré une seconde tentative avec une limite plus large. Il est conservé ci-dessous, mais aucune note ni décision n'en est tirée.</Alert></div>}
+                {analysis.status === 'failed' && <div className="mt-3"><Alert tone="danger">Le message transmis n'a pas pu être vérifié : cette analyse n'est pas utilisée. Relancez-la.</Alert></div>}
                 {analysis.parsed?.scoreConflict && <div className="mt-3"><Alert tone="warning">La note n'a pas pu être lue avec certitude : fiez-vous au rapport ci-dessous.</Alert></div>}
-                {analysis.parsed?.truncated && <div className="mt-3"><Alert tone="warning">Le rapport a été interrompu avant sa fin (longueur maximale atteinte).</Alert></div>}
+                <IntegrityPanel jobId={job.id} analysis={analysis} />
                 {analysis.parsed?.missingKeywords?.length > 0 && (
                   <div className="mt-3">
                     <p className="text-[12.5px] font-medium text-slate-700">Mots-clés signalés absents du CV</p>
@@ -298,10 +372,10 @@ export function JobDetail({ id }: { id: string }) {
             )}
             {PRE_DECISION.includes(job.stage) && analysis && (
               <Card className="p-4">
-                <CardHeader flush title="Vos précisions" description="Elles sont prises en compte dans l'analyse et dans vos documents." />
+                <CardHeader flush title="Vos précisions" description="Elles mettent à jour l'adéquation et serviront à votre CV personnalisé, lui-même noté par votre prompt. La note ATS porte sur votre CV tel qu'il est : vos précisions n'y sont jamais ajoutées." />
                 <div className="mt-3"><FeedbackForm stacked questions={questions} onChange={setFb} /></div>
                 {(fb.skills.length > 0 || fb.note.trim()) && (
-                  <Button className="mt-3" icon={<RefreshCw className="size-4" />} loading={review.isPending} onClick={() => review.mutate('reanalyze')}>Relancer l'analyse avec mes précisions</Button>
+                  <Button className="mt-3" icon={<RefreshCw className="size-4" />} loading={review.isPending} onClick={() => review.mutate('reanalyze')}>Enregistrer mes précisions et réévaluer</Button>
                 )}
               </Card>
             )}

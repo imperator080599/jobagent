@@ -9,7 +9,8 @@ import { actionItems, atsAnalyses, cvVersions, feedback, jobs, letters, llmCalls
 import { newId } from '../../src/db/ids.js';
 import { documentCapabilities } from '../../src/docs/convert.js';
 import { mockCalls, overrideMock, resetMockCalls } from '../../src/llm/mock.js';
-import { fillAtsPrompt, parseAtsReport } from '../../src/pipeline/ats.js';
+import { parseAtsReport } from '../../src/pipeline/ats.js';
+import { assembleAtsPrompt, reconstructPrompt } from '../../src/pipeline/ats-integrity.js';
 import { applyCriteria, priorityScore } from '../../src/pipeline/qualify.js';
 import { runWorker } from '../../src/pipeline/worker.js';
 import { getCurrentMaster } from '../../src/profile/cv.js';
@@ -60,30 +61,38 @@ beforeAll(async () => {
 afterAll(() => t.close());
 
 describe('prompt ATS de l’utilisateur', () => {
-  it('remplit uniquement les deux zones prévues, sans toucher au reste du prompt', () => {
-    const filled = fillAtsPrompt(USER_PROMPT, 'MON CV', 'MON OFFRE');
-    expect(filled).toMatchObject({ cv: 'slot', offer: 'slot' });
-    expect(filled.text).toBe(USER_PROMPT.replace('■ CV : Copier/coller', '■ CV : \nMON CV').replace('■ Offre d’emploi : Copier/coller', '■ Offre d’emploi : \nMON OFFRE'));
-    // Tout ce qui précède les zones est restitué caractère pour caractère.
-    const head = USER_PROMPT.slice(0, USER_PROMPT.indexOf('■ CV'));
-    expect(filled.text.startsWith(head)).toBe(true);
+  it('remplace uniquement les deux mentions « Copier/coller », sans toucher au reste du prompt', () => {
+    const a = assembleAtsPrompt(USER_PROMPT, 'MON CV', 'MON OFFRE');
+    expect(a.insertions.map((i) => [i.kind, i.placement, i.replaced])).toEqual([
+      ['cv', 'slot', 'Copier/coller'],
+      ['offer', 'slot', 'Copier/coller'],
+    ]);
+    expect(a.text).toBe(USER_PROMPT.replace('■ CV : Copier/coller', '■ CV : \nMON CV').replace('■ Offre d’emploi : Copier/coller', '■ Offre d’emploi : \nMON OFFRE'));
+    // Preuve : en remettant les mentions d'origine, on retrouve le prompt, octet pour octet.
+    expect(reconstructPrompt(a)).toBe(USER_PROMPT);
   });
 
-  it('accepte les jetons {{CV}} / {{OFFRE}} et, à défaut de zone, ajoute le contenu à la suite', () => {
-    expect(fillAtsPrompt('Analyse {{CV}} face à {{OFFRE}}.', 'A', 'B').text).toBe('Analyse A face à B.');
-    const appended = fillAtsPrompt('Analyse ce CV pour cette offre.', 'A', 'B');
-    expect(appended).toMatchObject({ cv: 'appended', offer: 'appended' });
-    expect(appended.text).toBe('Analyse ce CV pour cette offre.\n\n■ CV :\nA\n\n■ Offre d’emploi :\nB');
+  it('accepte les jetons {{CV}} / {{OFFRE}} et, à défaut de zone, ajoute le contenu après le prompt intact', () => {
+    expect(assembleAtsPrompt('Analyse {{CV}} face à {{OFFRE}}.', 'A', 'B').text).toBe('Analyse A face à B.');
+    // Aucun espace final du prompt n'est retiré.
+    const appended = assembleAtsPrompt('Analyse ce CV pour cette offre.  \n', 'A', 'B');
+    expect(appended.insertions.map((i) => i.placement)).toEqual(['appended', 'appended']);
+    expect(appended.text).toBe('Analyse ce CV pour cette offre.  \n\n\n■ CV :\nA\n\n■ Offre d’emploi :\nB');
+    expect(reconstructPrompt(appended)).toBe('Analyse ce CV pour cette offre.  \n');
   });
 
-  it('indique explicitement l’absence d’offre pour une évaluation du CV seul', () => {
-    const alone = fillAtsPrompt(USER_PROMPT, 'MON CV', null);
-    expect(alone.offer).toBe('none');
-    expect(alone.text).toContain('■ Offre d’emploi : \n(aucune offre jointe : évaluation du CV seul)');
+  it('évaluation du CV seul : la zone de l’offre est laissée telle que le prompt l’a écrite', () => {
+    const alone = assembleAtsPrompt(USER_PROMPT, 'MON CV', null);
+    expect(alone.insertions.map((i) => i.kind)).toEqual(['cv']);
+    expect(alone.text.endsWith('■ Offre d’emploi : Copier/coller')).toBe(true);
+    expect(reconstructPrompt(alone)).toBe(USER_PROMPT);
   });
 
   it('ne se laisse pas détourner par un texte de CV contenant des symboles de remplacement', () => {
-    expect(fillAtsPrompt('{{CV}}', 'Prix : $1 $& $`', 'x').text).toContain('Prix : $1 $& $`');
+    expect(assembleAtsPrompt('{{CV}}', 'Prix : $1 $& $`', 'x').text.startsWith('Prix : $1 $& $`')).toBe(true);
+    // Un CV ou une offre qui contient lui-même « ■ CV : Copier/coller » ne déplace pas l'insertion.
+    const tricky = assembleAtsPrompt(USER_PROMPT, '■ Offre d’emploi : Copier/coller', '■ CV : Copier/coller');
+    expect(reconstructPrompt(tricky)).toBe(USER_PROMPT);
   });
 
   it('lit le tableau et la note globale d’un rapport', () => {
@@ -105,9 +114,11 @@ describe('prompt ATS de l’utilisateur', () => {
     expect(parsedReal.total20).toBe(12.7);
     // Cas réel : la ligne TOTAL porte la note attribuée ET une projection après optimisation. Seule la première compte.
     const projected = '| # | Item | Note /5 | Constat | Amélioration |\n|---|---|---|---|---|\n| 1 | Titre | **3** | x | y |\n| 2 | Format | **4** | x | y |\n| 3 | Structure | **3** | x | y |\n| 4 | Mots-clés | **2,5** | x | y |\n| 5 | Abréviations | **3** | x | y |\n| 6 | Illisibles | **4** | x | y |\n| | **TOTAL** | **19,5 / 30 → 13 / 20** | | Avec les corrections proposées, le CV optimisé devrait se situer autour de **17 / 20**. |';
-    expect(parseAtsReport(projected)).toMatchObject({ total20: 13, confidence: 'row' });
-    expect(parseAtsReport('Note globale : 12/20. Après optimisation, le CV pourrait atteindre 16/20.').total20).toBe(12);
-    expect(parseAtsReport('Votre CV devrait viser 18/20.\n\n**Note globale ajustée : 11,5/20**').total20).toBe(11.5);
+    // La note projetée est conservée à part : elle ne remplace jamais la note attribuée.
+    expect(parseAtsReport(projected)).toMatchObject({ total20: 13, projected20: 17, confidence: 'row' });
+    expect(parseAtsReport('Note globale : 12/20. Après optimisation, le CV pourrait atteindre 16/20.')).toMatchObject({ total20: 12, projected20: 16 });
+    expect(parseAtsReport('Votre CV devrait viser 18/20.\n\n**Note globale ajustée : 11,5/20**')).toMatchObject({ total20: 11.5, projected20: 18 });
+    expect(parseAtsReport('**Note globale ajustée : 11,5/20**').projected20).toBeNull();
   });
 });
 
@@ -237,6 +248,9 @@ describe('de l’offre aux documents prêts', () => {
     expect(analysis!.score).toBe(job.atsScore);
     expect((analysis!.parsed as any).slots).toEqual({ cv: 'slot', offer: 'slot' });
     expect((analysis!.parsed as any).pdfAttached).toBe(true);
+    // Le message exact et la preuve d'intégrité sont enregistrés avec l'analyse.
+    expect(analysis!.requestText).toBe(call.prompt);
+    expect((analysis!.integrity as any)).toMatchObject({ ok: true, transmitted: { matches: true, source: 'mock' } });
     // Chaque appel au modèle est tracé avec son coût.
     const calls = await t.ctx.db.select().from(llmCalls).where(eq(llmCalls.jobId, jobId));
     expect(calls.map((c) => c.purpose).sort()).toEqual(['ats.analyze', 'ats.extract', 'job.qualify']);
@@ -280,11 +294,11 @@ describe('de l’offre aux documents prêts', () => {
 
     resetMockCalls();
     await work();
-    // La nouvelle analyse reçoit les précisions validées, en plus du CV.
-    const call = mockCalls().find((c) => c.purpose === 'ats.analyze')!;
-    expect(call.prompt).toContain('Précisions validées par le candidat');
-    expect(call.prompt).toContain(`${q1!.keyword} : compétence confirmée par le candidat`);
-    expect(call.prompt).toContain('insister sur les missions pour des fonds');
+    // Les précisions ne sont jamais ajoutées au CV noté par le prompt ATS (le document est noté tel qu'il est) :
+    // l'analyse identique est réutilisée sans être repayée, et l'adéquation est recalculée avec les précisions.
+    expect(mockCalls().some((c) => c.purpose === 'ats.analyze')).toBe(false);
+    const qualify = mockCalls().find((c) => c.purpose === 'job.qualify')!;
+    expect(qualify.prefix).toContain(`${q1!.keyword} : compétence confirmée par le candidat`);
     const again = (await api.get('/api/inbox')).data.items.find((i: any) => i.type === 'job.review' && i.jobId === jobId);
     const asked = (again.body.questions as { keyword: string }[]).map((q) => q.keyword);
     expect(asked).not.toContain(q1!.keyword);

@@ -12,67 +12,29 @@ import { getSetting } from '../core/settings.js';
 import { normalize, tokens } from '../core/text.js';
 import { newId } from '../db/ids.js';
 import { atsAnalyses, jobs } from '../db/schema.js';
-import { getLlm, UNTRUSTED_RULE } from '../llm/index.js';
+import { getLlm, UNTRUSTED_RULE, wrapUntrusted } from '../llm/index.js';
 import { registerMock } from '../llm/mock.js';
 import { getActiveAtsPrompt, type AtsPrompt } from '../profile/ats-prompt.js';
 import { type CvVersion, getCv } from '../profile/cv.js';
-import { ConfigError } from '../core/errors.js';
-import { cvToText } from '../shared/cv.js';
+import { ConfigError, NeedsHumanError } from '../core/errors.js';
 import { atsDecision, type AtsDecision } from '../shared/stages.js';
 import type { Job } from '../tracker/stage.js';
-import { applicationNotes, candidateBrief, clarificationsText, cvPdf, masterFor } from './brief.js';
-import { jobBlock } from './qualify.js';
+import { assembleAtsPrompt, type IntegrityRecord, PromptIntegrityError, verifyAssembly } from './ats-integrity.js';
+import { cvDocument, masterFor } from './brief.js';
+import { atsOfferText } from './qualify.js';
 
 export type AtsAnalysis = typeof atsAnalyses.$inferSelect;
 
-// ── Remplissage des zones du prompt ──
-
-const PLACEHOLDER = String.raw`(?:copier\s*\/\s*coller|copier-coller|coller ici|à coller|paste here|copy\s*\/\s*paste|\.{3}|…|\[\s*\.{0,3}\s*\])`;
-const CV_LABEL = String.raw`(?:CV|Curriculum vitae|Resume|Résumé)`;
-const OFFER_LABEL = String.raw`(?:Offre d[’'‘\`]emploi|Offre|Annonce|Job description|Job offer|Job posting|Fiche de poste)`;
-
-export interface FilledPrompt {
-  text: string;
-  /** slot = la zone prévue par le prompt a été remplie ; appended = aucune zone trouvée, contenu ajouté à la suite. */
-  cv: 'slot' | 'appended';
-  offer: 'slot' | 'appended' | 'none';
-}
-
-function fillSlot(prompt: string, label: string, token: RegExp, content: string): { text: string; filled: boolean } {
-  // 1. Jeton explicite : {{CV}}, [CV], <CV>
-  if (token.test(prompt)) return { text: prompt.replace(token, () => content), filled: true };
-  // 2. Ligne « ■ CV : Copier/coller » — seule la mention à remplacer change ; le libellé et la puce restent.
-  const line = new RegExp(String.raw`^([^\S\n]*[^\w\n]{0,4}[^\S\n]*${label}[^\S\n]*[:：][^\S\n]*)${PLACEHOLDER}[^\S\n]*$`, 'gim');
-  let last: RegExpExecArray | null = null;
-  for (let m = line.exec(prompt); m; m = line.exec(prompt)) last = m;
-  if (last) {
-    const start = last.index + last[1]!.length;
-    return { text: `${prompt.slice(0, start)}\n${content}${prompt.slice(last.index + last[0].length)}`, filled: true };
-  }
-  return { text: prompt, filled: false };
-}
+// ── Assemblage : voir ats-integrity.ts (remplacement des seules mentions « Copier/coller », preuve par empreintes) ──
 
 /**
- * Insère le CV et l'offre dans le prompt de l'utilisateur. Le reste du prompt est
- * restitué caractère pour caractère. Sans offre (évaluation du CV seul), la zone
- * de l'offre indique explicitement qu'aucune offre n'est jointe.
+ * Cadre technique transmis en consigne système, distinct du prompt de l'utilisateur. Il ne contient
+ * aucune règle de notation : il demande une exécution fidèle et rappelle la règle de sécurité sur
+ * les données externes (l'offre). Son empreinte est enregistrée avec chaque analyse.
  */
-export function fillAtsPrompt(prompt: string, cv: string, offer: string | null): FilledPrompt {
-  const a = fillSlot(prompt, CV_LABEL, /\{\{\s*CV\s*\}\}|\[\s*CV\s*\]|<\s*CV\s*>/i, cv);
-  let text = a.text;
-  const offerContent = offer ?? '(aucune offre jointe : évaluation du CV seul)';
-  const b = fillSlot(text, OFFER_LABEL, /\{\{\s*(?:OFFRE|OFFER|JOB|ANNONCE)\s*\}\}|\[\s*(?:OFFRE|OFFER|JOB|ANNONCE)\s*\]|<\s*(?:OFFRE|OFFER|JOB)\s*>/i, offerContent);
-  text = b.text;
-  if (!a.filled) text = `${text.trimEnd()}\n\n■ CV :\n${cv}`;
-  if (!b.filled && offer !== null) text = `${text.trimEnd()}\n\n■ Offre d’emploi :\n${offer}`;
-  return { text, cv: a.filled ? 'slot' : 'appended', offer: offer === null ? 'none' : b.filled ? 'slot' : 'appended' };
-}
-
-/** Cadre technique minimal. Il ne modifie pas la méthode de l'utilisateur : il fixe la fidélité d'exécution et la règle de sécurité. */
-export const ATS_SYSTEM = `Le message qui suit est le prompt personnel d'analyse ATS de l'utilisateur, avec son CV et, le cas échéant, une offre d'emploi. Exécute ce prompt fidèlement, tel qu'il est écrit : même rôle, mêmes items, même barème, même format de restitution. N'en retire rien et n'y ajoute aucun critère.
-Le CV est fourni en texte ; lorsque son fichier PDF est joint, sers-t'en pour apprécier le format et la mise en page réels.
+export const ATS_SYSTEM = `Le message qui suit est le prompt personnel d'analyse ATS de l'utilisateur, dans lequel ont été insérés son CV et, le cas échéant, une offre d'emploi. Exécute ce prompt fidèlement, tel qu'il est écrit : même rôle, mêmes items, même barème, même format de restitution. N'en retire rien et n'y ajoute aucun critère.
+Le CV est fourni sous forme de texte extrait de son document ; lorsque le fichier PDF est joint, sers-t'en pour apprécier le format et la mise en page réels.
 Tu ne disposes d'aucun outil : si le prompt demande de produire un fichier, donne son contenu dans ta réponse, dans une section clairement intitulée.
-Si des « précisions validées par le candidat » accompagnent le CV, considère-les comme faisant partie de son profil réel.
 ${UNTRUSTED_RULE}`;
 
 // ── Lecture de la réponse ──
@@ -84,7 +46,10 @@ export interface AtsItem {
 }
 
 export interface AtsParsed {
+  /** Note attribuée par le prompt de l'utilisateur. */
   total20: number | null;
+  /** Note que le rapport estime atteignable après optimisation (jamais confondue avec la note attribuée). */
+  projected20: number | null;
   items: AtsItem[];
   missingKeywords: string[];
   alerts: string[];
@@ -105,7 +70,7 @@ const cellsOf = (line: string): string[] => {
 };
 
 /** Lecture déterministe : tableau d'items notés sur 5 et note globale sur 20. */
-export function parseAtsReport(raw: string): { total20: number | null; items: AtsItem[]; source: 'report' | 'items' | 'none'; candidates: number[]; confidence: 'row' | 'line' | 'fallback' } {
+export function parseAtsReport(raw: string): { total20: number | null; projected20: number | null; items: AtsItem[]; source: 'report' | 'items' | 'none'; candidates: number[]; confidence: 'row' | 'line' | 'fallback' } {
   const items: AtsItem[] = [];
   const lines = raw.split('\n');
   // Colonnes du tableau en cours : la note peut être écrite « 4/5 » dans la cellule, ou « 4 » sous un en-tête « Note /5 ».
@@ -143,6 +108,9 @@ export function parseAtsReport(raw: string): { total20: number | null; items: At
   const lineStart = (i: number) => raw.lastIndexOf('\n', i) + 1;
   const lineOf = (i: number) => raw.slice(lineStart(i), raw.indexOf('\n', i) === -1 ? raw.length : raw.indexOf('\n', i));
   const hypothetical = (t: { index: number }) => HYPOTHETICAL.test(raw.slice(Math.max(lineStart(t.index), t.index - 90), t.index));
+  // Note projetée : une note sur 20 annoncée au conditionnel ou « après optimisation ».
+  const projectedHits = all.filter((t) => hypothetical(t));
+  const projected20 = projectedHits.length ? projectedHits[projectedHits.length - 1]!.value : null;
   let total: number | null = null;
   let confidence: 'row' | 'line' | 'fallback' = 'fallback';
   // 1. Ligne « TOTAL » d'un tableau : la première cellule qui porte une note sur 20 (« 19,5/30 → 13/20 » donne 13).
@@ -150,7 +118,8 @@ export function parseAtsReport(raw: string): { total20: number | null; items: At
     if (!line.includes('|')) continue;
     const cells = cellsOf(line);
     if (!cells.some((c) => /^(total|note (globale|finale)|score (global|final)|somme)\b/i.test(c))) continue;
-    const cell = cells.find((c) => /\d\s*\/\s*20\b/.test(c));
+    // La cellule de la note attribuée, jamais celle d'un commentaire de projection.
+    const cell = cells.find((c) => /\d\s*\/\s*20\b/.test(c) && !/(devrait|pourrait|après|estim|optimis|would|could|after)/i.test(c));
     const found = cell ? [...cell.matchAll(/(\d{1,2}(?:[.,]\d{1,2})?)\s*\/\s*20\b/g)] : [];
     if (found.length) {
       total = num(found[found.length - 1]![1]!);
@@ -167,18 +136,19 @@ export function parseAtsReport(raw: string): { total20: number | null; items: At
   }
   // 3. À défaut, la dernière note sur 20 qui n'est pas une projection.
   if (total == null && all.length) total = (all.filter((t) => !hypothetical(t)).pop() ?? all[all.length - 1]!).value;
-  if (total != null) return { total20: total, items, source: 'report', candidates, confidence };
+  if (total != null) return { total20: total, projected20, items, source: 'report', candidates, confidence };
   const scored = items.filter((i) => i.score5 != null);
   if (scored.length >= 3) {
     // « Ajuste la somme des points sur 20 » : somme des notes rapportée au maximum possible.
     const sum = scored.reduce((a, i) => a + (i.score5 ?? 0), 0);
-    return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, items, source: 'items', candidates, confidence: 'fallback' };
+    return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, projected20, items, source: 'items', candidates, confidence: 'fallback' };
   }
-  return { total20: null, items, source: 'none', candidates, confidence: 'fallback' };
+  return { total20: null, projected20, items, source: 'none', candidates, confidence: 'fallback' };
 }
 
 const AtsExtract = z.object({
-  total20: z.number().min(0).max(20).nullable().describe('Note globale sur 20 telle qu\'elle figure dans le rapport, ou null si elle n\'y est pas.'),
+  total20: z.number().min(0).max(20).nullable().describe('Note globale sur 20 ATTRIBUÉE au CV dans le rapport, ou null si elle n\'y est pas. Jamais une note estimée après optimisation.'),
+  projected20: z.number().min(0).max(20).nullable().describe('Note sur 20 que le rapport estime atteignable après optimisation, si le rapport en mentionne une ; sinon null.'),
   items: z.array(z.object({ label: z.string(), score5: z.number().min(0).max(5).nullable(), improvement: z.string() })).describe('Items évalués, dans l\'ordre du rapport.'),
   missingKeywords: z.array(z.string()).max(60).describe('Mots-clés que le rapport signale comme absents du CV.'),
   alerts: z.array(z.string()).max(10).describe('Alertes de lisibilité ou de format signalées par le rapport.'),
@@ -192,7 +162,7 @@ export async function extractAtsReport(ctx: UserContext, raw: string, jobId?: st
   let ext: z.infer<typeof AtsExtract> | null = null;
   try {
     const llm = await getLlm(ctx);
-    ext = (await llm.json({ purpose: 'ats.extract', tier: 'bulk', system: EXTRACT_SYSTEM, prompt: `<rapport>\n${raw.slice(0, 40_000)}\n</rapport>`, schema: AtsExtract, maxTokens: 3000, effort: 'low', jobId })).data;
+    ext = (await llm.json({ purpose: 'ats.extract', tier: 'bulk', system: EXTRACT_SYSTEM, prompt: `<rapport>\n${raw}\n</rapport>`, schema: AtsExtract, maxTokens: 4000, effort: 'low', jobId })).data;
   } catch (err) {
     ctx.log.warn('ats_extract_failed', { error: String(err) });
   }
@@ -206,8 +176,11 @@ export async function extractAtsReport(ctx: UserContext, raw: string, jobId?: st
   const scored = det.items.filter((i) => i.score5 != null);
   const fromItems = scored.length >= 3 ? Math.round((scored.reduce((a, i) => a + (i.score5 ?? 0), 0) / (scored.length * 5)) * 200) / 10 : null;
   const scoreConflict = disagree && !(fromItems != null && total20 != null && Math.abs(fromItems - total20) <= 0.5);
+  // Note projetée : lecture du code d'abord ; l'extraction ne la fournit qu'en complément. Elle ne peut jamais devenir la note attribuée.
+  const projected20 = det.projected20 ?? ext?.projected20 ?? null;
   return {
     total20,
+    projected20: projected20 != null && total20 != null && Math.abs(projected20 - total20) < 0.05 ? null : projected20,
     items: det.items.length >= (ext?.items.length ?? 0) ? det.items : (ext?.items ?? []),
     missingKeywords: [...new Set((ext?.missingKeywords ?? []).map((k) => k.trim()).filter(Boolean))],
     alerts: ext?.alerts ?? [],
@@ -238,20 +211,37 @@ export interface AtsRunResult {
   cv: CvVersion;
 }
 
+/** Estimation prudente du nombre de jetons (textes en français et en anglais) : on surestime plutôt que de couper. */
+const estimateTokens = (chars: number) => Math.ceil(chars / 3);
+/** Fenêtre de contexte disponible pour le modèle principal (jetons). */
+const CONTEXT_TOKENS = 200_000;
+const OUTPUT_TOKENS = [32_000, 64_000];
+
 export async function runAtsAnalysis(ctx: UserContext, input: AtsRunInput): Promise<AtsRunResult> {
   const prompt = await getActiveAtsPrompt(ctx.db, ctx.userId);
   if (!prompt) throw new ConfigError('Aucun prompt ATS actif (Profil → Prompt ATS).', 'ats_prompt_missing');
   const job = input.job;
   const cv = input.cv ?? (await masterFor(ctx, job?.language || undefined));
-  const brief = await candidateBrief(ctx, { master: cv.kind === 'master' ? cv : undefined, language: cv.language });
-  const notes = job ? await applicationNotes(ctx, job.id) : [];
-  if (input.note?.trim()) notes.push(input.note.trim());
-  const clarifications = clarificationsText(brief, notes);
-  const cvBlock = `${cvToText(cv.data)}${clarifications ? `\n\nPrécisions validées par le candidat (à considérer comme faisant partie de son profil réel) :\n${clarifications}` : ''}`;
-  const filled = fillAtsPrompt(prompt.content, cvBlock, job ? jobBlock(job, 30_000) : null);
+  // CV : le document lui-même (texte extrait du fichier + PDF joint), sans ajout ni reconstitution.
+  const doc = await cvDocument(ctx, cv);
+  // Offre : texte complet, encadré comme donnée externe (règle de sécurité), sans annotation ni troncature.
+  const offer = job ? wrapUntrusted('offre', atsOfferText(job)) : null;
+  const assembled = assembleAtsPrompt(prompt.content, doc.text, offer);
+  const check = verifyAssembly(prompt.content, prompt.sha256, assembled);
+  if (check.problems.length) {
+    await logActivity(ctx.db, { userId: ctx.userId, actor: 'agent:ats', action: 'ats.integrity_failed', level: 'error', summary: `Analyse ATS annulée : ${check.problems.join(' ')}`, entityType: 'job', entityId: job?.id ?? '' });
+    throw new PromptIntegrityError(`Intégrité du prompt ATS non garantie : ${check.problems.join(' ')} L'analyse n'a pas été lancée.`);
+  }
+  // Taille : jamais de troncature silencieuse. Si l'ensemble ne tient pas, l'analyse n'est pas lancée et la raison est donnée.
+  const inputTokens = estimateTokens(ATS_SYSTEM.length + assembled.text.length) + (doc.pdf ? doc.pages * 3_000 : 0);
+  if (inputTokens + OUTPUT_TOKENS[0]! > CONTEXT_TOKENS) {
+    throw new NeedsHumanError(`Le prompt, le CV et l'offre représentent environ ${inputTokens} jetons, au-delà de ce que le modèle peut lire en une fois (${CONTEXT_TOKENS - OUTPUT_TOKENS[0]!} jetons utilisables). Rien n'a été coupé : l'analyse n'est pas lancée. Raccourcissez l'annonce enregistrée ou choisissez un modèle à plus grande fenêtre.`, 'ats_input_too_large', { inputTokens });
+  }
   const models = await getSetting(ctx.db, ctx.userId, 'llm.models');
+  const requestSha256 = sha256(assembled.text);
+  const systemSha256 = sha256(ATS_SYSTEM);
   // Empreinte de tout ce qui influe sur le résultat : une analyse identique n'est jamais payée deux fois.
-  const inputHash = sha256([prompt.sha256, sha256(cvBlock), job ? `${job.id}:${job.descriptionHash}:${sha256(job.title + job.companyName)}` : 'cv-only', models.main, ATS_SYSTEM.length].join('|'));
+  const inputHash = sha256([prompt.sha256, requestSha256, systemSha256, doc.pdfSha256 ?? '', models.main].join('|'));
   const jobId = job?.id ?? null;
   if (!input.force && jobId) {
     const [prev] = await ctx.db
@@ -266,28 +256,83 @@ export async function runAtsAnalysis(ctx: UserContext, input: AtsRunInput): Prom
     }
   }
   const llm = await getLlm(ctx);
-  const pdf = await cvPdf(ctx, cv);
-  const res = await llm.text({ purpose: 'ats.analyze', tier: 'main', system: ATS_SYSTEM, prompt: filled.text, documents: pdf ? [{ mediaType: 'application/pdf', data: pdf }] : undefined, maxTokens: 24_000, effort: 'high', jobId: jobId ?? undefined });
-  if (res.refused || !res.text.trim()) {
+  const pdfAttached = Boolean(doc.pdf) && llm.provider !== 'claude-cli';
+  let res: Awaited<ReturnType<typeof llm.text>> | null = null;
+  let attempts = 0;
+  let maxTokens = OUTPUT_TOKENS[0]!;
+  // Une sortie interrompue par la limite de longueur est relancée avec une limite plus large ; jamais tronquée en silence.
+  for (const budget of OUTPUT_TOKENS) {
+    attempts++;
+    maxTokens = budget;
+    res = await llm.text({ purpose: 'ats.analyze', tier: 'main', system: ATS_SYSTEM, prompt: assembled.text, documents: doc.pdf ? [{ mediaType: 'application/pdf', data: doc.pdf }] : undefined, maxTokens: budget, effort: 'high', jobId: jobId ?? undefined });
+    if (res.refused || res.stopReason !== 'max_tokens') break;
+  }
+  const r = res!;
+  const complete = r.stopReason !== 'max_tokens';
+  const problems: string[] = [];
+  const sentPdf = r.sent?.documents?.find((d) => d.mediaType === 'application/pdf') ?? null;
+  const transmitted = r.sent
+    ? {
+        provider: llm.provider,
+        source: r.sent.source,
+        sha256: r.sent.sha256,
+        chars: r.sent.chars,
+        matches: r.sent.sha256 === requestSha256,
+        systemMatches: r.sent.systemSha256 == null ? null : r.sent.systemSha256 === systemSha256,
+        pdf: sentPdf ? { sha256: sentPdf.sha256, bytes: sentPdf.bytes, matches: sentPdf.sha256 === doc.pdfSha256 } : null,
+      }
+    : undefined;
+  if (transmitted && !transmitted.matches) problems.push('Le texte transmis par le fournisseur diffère du message assemblé.');
+  if (transmitted?.systemMatches === false) problems.push('La consigne système transmise diffère de celle prévue.');
+  if (transmitted?.pdf && !transmitted.pdf.matches) problems.push('Le PDF transmis ne correspond pas au CV évalué.');
+  if (!complete) problems.push(`Le rapport a été interrompu par la limite de longueur (${maxTokens} jetons) après ${attempts} essai(s) : il est conservé mais n'est pas utilisé pour décider.`);
+  const integrity: IntegrityRecord = {
+    ok: problems.length === 0,
+    promptSha256: check.promptSha256,
+    promptStoredSha256: prompt.sha256,
+    promptChars: prompt.content.length,
+    reconstructedSha256: check.reconstructedSha256,
+    requestSha256,
+    requestChars: assembled.text.length,
+    systemSha256,
+    insertions: assembled.insertions.map((i) => ({ kind: i.kind, placement: i.placement, replaced: i.replaced, start: i.start, chars: i.end - i.start, sha256: sha256(assembled.text.slice(i.start, i.end)) })),
+    cv: { source: doc.source, chars: doc.text.length, sha256: sha256(doc.text), pdfAttached, pdfSha256: doc.pdfSha256 },
+    offer: job ? { chars: atsOfferText(job).length, sha256: sha256(atsOfferText(job)), complete: true } : null,
+    transmitted,
+    output: { sha256: sha256(r.text), chars: r.text.length, stopReason: r.stopReason, complete, maxTokens, attempts },
+    problems,
+  };
+  if (r.refused || !r.text.trim()) {
     if (jobId) {
-      await ctx.db.insert(atsAnalyses).values({ id: newId('ats'), userId: ctx.userId, jobId, cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: res.model, rawOutput: res.text, status: 'refused' });
+      await ctx.db.insert(atsAnalyses).values({ id: newId('ats'), userId: ctx.userId, jobId, cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: r.model, rawOutput: r.text, status: 'refused', requestText: assembled.text, integrity: integrity as unknown as Record<string, unknown> });
     }
     throw new Error("Le modèle n'a pas produit d'analyse pour cette offre.");
   }
-  const parsed = await extractAtsReport(ctx, res.text, jobId ?? undefined);
+  // Un texte transmis qui ne correspond pas au message vérifié invalide l'analyse.
+  const usable = complete && (!transmitted || (transmitted.matches && transmitted.systemMatches !== false && (!transmitted.pdf || transmitted.pdf.matches)));
+  const parsed: AtsParsed = complete ? await extractAtsReport(ctx, r.text, jobId ?? undefined) : { ...parseAtsReport(r.text), missingKeywords: [], alerts: [], summary: '', scoreSource: 'report' as const };
   const thresholds = await getSetting(ctx.db, ctx.userId, 'ats.thresholds');
-  const decision = parsed.total20 == null ? null : atsDecision(parsed.total20, thresholds);
-  const meta = { ...parsed, slots: { cv: filled.cv, offer: filled.offer }, pdfAttached: Boolean(pdf) && llm.provider !== 'claude-cli', truncated: res.stopReason === 'max_tokens', costUsd: res.costUsd } as unknown as Record<string, unknown>;
+  const decision = !usable || parsed.total20 == null ? null : atsDecision(parsed.total20, thresholds);
+  const status: AtsAnalysis['status'] = usable ? 'ok' : complete ? 'failed' : 'incomplete';
+  const meta = { ...parsed, slots: { cv: assembled.insertions.find((i) => i.kind === 'cv')?.placement, offer: assembled.insertions.find((i) => i.kind === 'offer')?.placement ?? 'none' }, pdfAttached, truncated: !complete, costUsd: r.costUsd } as unknown as Record<string, unknown>;
+  const values = { userId: ctx.userId, cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: r.model, rawOutput: r.text, parsed: meta, score: usable ? parsed.total20 : null, projectedScore: parsed.projected20, decision: decision ?? '', userNote: input.note ?? '', status, requestText: assembled.text, integrity: integrity as unknown as Record<string, unknown> };
   if (!jobId) {
     // Évaluation du CV seul : rien n'est rattaché à une offre ; le résultat est rendu sans être stocké comme analyse d'offre.
-    const analysis = { id: newId('ats'), userId: ctx.userId, jobId: '', cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: res.model, rawOutput: res.text, parsed: meta, score: parsed.total20, decision: decision ?? '', userNote: input.note ?? '', status: 'ok' as const, createdAt: ctx.now() };
+    const analysis = { id: newId('ats'), jobId: '', createdAt: ctx.now(), ...values } as AtsAnalysis;
     return { analysis, parsed, decision, reused: false, prompt, cv };
   }
-  const [analysis] = await ctx.db
-    .insert(atsAnalyses)
-    .values({ id: newId('ats'), userId: ctx.userId, jobId, cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: res.model, rawOutput: res.text, parsed: meta, score: parsed.total20, decision: decision ?? '', userNote: input.note ?? '', status: 'ok' })
-    .returning();
-  await logActivity(ctx.db, { userId: ctx.userId, actor: 'agent:ats', action: 'ats.analyzed', summary: `${job!.companyName} — ${job!.title} : ${parsed.total20 != null ? `${parsed.total20}/20` : 'note non lisible'} (${cv.kind === 'master' ? 'CV master' : 'CV personnalisé'}, prompt v${prompt.version})`, entityType: 'job', entityId: jobId, data: { analysisId: analysis!.id, score: parsed.total20, promptVersion: prompt.version, cvVersionId: cv.id } });
+  const [analysis] = await ctx.db.insert(atsAnalyses).values({ id: newId('ats'), jobId, ...values }).returning();
+  await logActivity(ctx.db, {
+    userId: ctx.userId,
+    actor: 'agent:ats',
+    action: usable ? 'ats.analyzed' : 'ats.unusable',
+    level: usable ? 'info' : 'warn',
+    summary: `${job!.companyName} — ${job!.title} : ${usable ? (parsed.total20 != null ? `${parsed.total20}/20` : 'note non lisible') : problems.join(' ')} (${cv.kind === 'master' ? 'CV master' : 'CV personnalisé'}, prompt v${prompt.version}, empreinte ${prompt.sha256.slice(0, 12)})`,
+    entityType: 'job',
+    entityId: jobId,
+    data: { analysisId: analysis!.id, score: parsed.total20, projected: parsed.projected20, promptVersion: prompt.version, promptSha256: prompt.sha256, requestSha256, cvVersionId: cv.id },
+  });
+  if (!usable) throw new NeedsHumanError(`Analyse ATS inutilisable : ${problems.join(' ')}`, 'ats_unusable', { analysisId: analysis!.id });
   return { analysis: analysis!, parsed, decision, reused: false, prompt, cv };
 }
 
@@ -365,5 +410,5 @@ registerMock('ats.extract', (req) => {
   const raw = /<rapport>\n([\s\S]*)\n<\/rapport>/.exec(req.prompt)?.[1] ?? '';
   const det = parseAtsReport(raw);
   const section = /### Mots-clés manquants\n([\s\S]*)$/.exec(raw)?.[1] ?? '';
-  return { total20: det.total20, items: det.items, missingKeywords: section.split('\n').map((l) => l.replace(/^-\s*/, '').trim()).filter((l) => l && l !== 'Aucun.'), alerts: [], summary: det.total20 != null ? `Note globale ${det.total20}/20.` : '' };
+  return { total20: det.total20, projected20: det.projected20, items: det.items, missingKeywords: section.split('\n').map((l) => l.replace(/^-\s*/, '').trim()).filter((l) => l && l !== 'Aucun.'), alerts: [], summary: det.total20 != null ? `Note globale ${det.total20}/20.` : '' };
 });

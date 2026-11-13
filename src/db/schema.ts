@@ -650,10 +650,18 @@ export const atsAnalyses = pgTable(
     rawOutput: text('raw_output').notNull(),
     /** Synthèse structurée extraite de la sortie (jamais substituée à l'original). */
     parsed: jsonb('parsed').$type<Json>(),
+    /** Note attribuée par le prompt de l'utilisateur (jamais une note projetée). */
     score: real('score'),
+    /** Note que le rapport estime atteignable après optimisation, si le rapport en mentionne une. Distincte de la note attribuée. */
+    projectedScore: real('projected_score'),
     decision: text('decision').notNull().default(''),
     userNote: text('user_note').notNull().default(''),
-    status: text('status').$type<'ok' | 'failed' | 'refused'>().notNull().default('ok'),
+    /** incomplete = sortie interrompue (limite de longueur) : rapport conservé mais jamais utilisé pour décider. */
+    status: text('status').$type<'ok' | 'failed' | 'refused' | 'incomplete'>().notNull().default('ok'),
+    /** Message exact transmis au modèle (prompt de l'utilisateur + CV + offre), pour audit. */
+    requestText: text('request_text').notNull().default(''),
+    /** Preuve d'intégrité : empreintes du prompt, du message, du CV, de l'offre et de la sortie. */
+    integrity: jsonb('integrity').$type<Json>(),
     createdAt: createdAt(),
   },
   (t) => [index('ats_job_idx').on(t.jobId, t.createdAt), index('ats_hash_idx').on(t.userId, t.inputHash)],

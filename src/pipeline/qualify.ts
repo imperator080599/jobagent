@@ -105,7 +105,20 @@ export function jobBlock(job: Pick<Job, 'title' | 'companyName' | 'locationRaw' 
     job.remote ? `Mode de travail (détecté) : ${job.remote}` : '',
     job.yearsMin != null ? `Expérience demandée (détectée) : ${job.yearsMin}${job.yearsMax != null ? ` à ${job.yearsMax}` : '+'} ans` : '',
   ].filter(Boolean);
-  return wrapUntrusted('offre', `${meta.join('\n')}\n\n${job.descriptionText.slice(0, maxChars)}`);
+  // Toute coupe est signalée explicitement dans le texte : jamais de troncature silencieuse.
+  const cut = job.descriptionText.length > maxChars;
+  const body = cut ? `${job.descriptionText.slice(0, maxChars)}\n\n[Annonce coupée pour cette étape : ${maxChars} caractères sur ${job.descriptionText.length}.]` : job.descriptionText;
+  return wrapUntrusted('offre', `${meta.join('\n')}\n\n${body}`);
+}
+
+/**
+ * Offre transmise au prompt ATS de l'utilisateur : le texte complet de l'annonce, tel que publié,
+ * précédé de l'intitulé, de l'entreprise et du lieu indiqués par la source. Aucune annotation de
+ * JobAgent (« détecté ») et aucune troncature.
+ */
+export function atsOfferText(job: Pick<Job, 'title' | 'companyName' | 'locationRaw' | 'descriptionText' | 'canonicalUrl' | 'applyUrl'>): string {
+  const head = [`Intitulé : ${job.title}`, `Entreprise : ${job.companyName}`, job.locationRaw ? `Lieu : ${job.locationRaw}` : '', job.canonicalUrl || job.applyUrl ? `Adresse de l'annonce : ${job.canonicalUrl || job.applyUrl}` : ''].filter(Boolean);
+  return `${head.join('\n')}\n\n${job.descriptionText}`;
 }
 
 export interface Qualification extends QualifyOut {
@@ -179,6 +192,17 @@ export async function qualifyJob(ctx: UserContext, job: Job, brief?: CandidateBr
   const weights = await getSetting(ctx.db, ctx.userId, 'scoring.weights');
   const priority = priorityScore(scores, freshness(job, now), weights, tier, job.deadlineAt, now);
   return { ...scores, relevance: Math.round(scores.relevance), fit: Math.round(scores.fit), priority, method, rules, injection, companyTier: tier };
+}
+
+/** Recalcule pertinence et adéquation (par ex. après de nouvelles précisions), sans changer l'étape de l'offre. */
+export async function refreshQualification(ctx: UserContext, job: Job): Promise<Job> {
+  const q = await qualifyJob(ctx, job);
+  const [updated] = await ctx.db
+    .update(jobs)
+    .set({ relevanceScore: q.relevance, fitScore: q.fit, priorityScore: q.priority, strategic: q.strategic, qualification: { summary: q.summary, strengths: q.strengths, gaps: q.gaps, blockers: q.blockers, rules: q.rules, companyTier: q.companyTier } as Record<string, unknown>, qualifiedAt: ctx.now(), qualificationMethod: q.method, updatedAt: ctx.now() })
+    .where(and(eq(jobs.id, job.id), eq(jobs.userId, ctx.userId)))
+    .returning();
+  return updated ?? job;
 }
 
 /** Nombre d'analyses ATS déjà réalisées aujourd'hui (plafond de coût). */

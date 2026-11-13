@@ -5,6 +5,7 @@
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { ConfigError } from '../core/errors.js';
+import { sha256 } from '../core/crypto.js';
 import type { LlmJsonRequest, LlmProvider, LlmRequest } from './types.js';
 
 interface CliResult {
@@ -71,8 +72,10 @@ export function createCliProvider(): LlmProvider {
   return {
     name: 'claude-cli',
     async text(req, model) {
-      const r = await runCli(baseArgs(req, model), `${req.prefix ? `${req.prefix}\n\n` : ''}${req.prompt}`, 15 * 60_000);
-      return { text: r.result ?? '', model: served(r, model), provider: 'claude-cli', usage: usage(r), stopReason: r.stop_reason ?? '', refused: r.stop_reason === 'refusal' };
+      const input = `${req.prefix ? `${req.prefix}\n\n` : ''}${req.prompt}`;
+      const r = await runCli(baseArgs(req, model), input, 15 * 60_000);
+      // Empreinte du texte écrit sur l'entrée standard de Claude Code (au-delà, la transmission relève de l'outil).
+      return { text: r.result ?? '', model: served(r, model), provider: 'claude-cli', usage: usage(r), stopReason: r.stop_reason ?? '', refused: r.stop_reason === 'refusal', sent: { sha256: sha256(input), chars: input.length, source: 'stdin', systemSha256: sha256(baseArgs(req, model)[baseArgs(req, model).indexOf('--system-prompt') + 1]!), documents: [] } };
     },
     async json<T>(req: LlmJsonRequest<T>, model: string) {
       // La CLI n'accepte pas l'en-tête « $schema » : on ne transmet que le schéma lui-même.

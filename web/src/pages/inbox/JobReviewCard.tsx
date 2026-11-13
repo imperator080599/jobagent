@@ -95,7 +95,7 @@ function ReviewCard({ item, onDone }: { item: ActionItem; onDone: () => void }) 
   const act = useMutation({
     mutationFn: (decision: 'pursue' | 'reject' | 'reanalyze' | 'later') => post(`/jobs/${item.jobId}/review`, { decision, skills: fb.skills, note: fb.note || undefined, noteScope: fb.noteScope, reason: reason || undefined }),
     onSuccess: (_d, decision) => {
-      toast(decision === 'pursue' ? 'Candidature lancée : le CV puis la lettre sont en préparation.' : decision === 'reject' ? 'Offre écartée.' : decision === 'reanalyze' ? 'Nouvelle analyse en cours avec vos précisions.' : 'Reportée de trois jours.', decision === 'pursue' ? 'success' : 'neutral');
+      toast(decision === 'pursue' ? 'Candidature lancée : le CV puis la lettre sont en préparation.' : decision === 'reject' ? 'Offre écartée.' : decision === 'reanalyze' ? 'Précisions enregistrées : réévaluation en cours.' : 'Reportée de trois jours.', decision === 'pursue' ? 'success' : 'neutral');
       setRejecting(false);
       onDone();
     },
@@ -116,6 +116,12 @@ function ReviewCard({ item, onDone }: { item: ActionItem; onDone: () => void }) 
             {item.title}
           </Link>
           {b.summary && <p className="mt-1 text-[13px] leading-relaxed text-slate-600">{b.summary}</p>}
+          {b.score != null && (
+            <p className="mt-1 text-[12px] text-slate-500">
+              Note attribuée par votre prompt : {String(b.score).replace('.', ',')}/20
+              {b.projected != null && ` · estimation du rapport après optimisation : ${String(b.projected).replace('.', ',')}/20 (non mesurée)`}
+            </p>
+          )}
         </div>
       </div>
       <div className="grid gap-4 border-t border-slate-100 px-4 py-3 sm:grid-cols-3 sm:px-5">
