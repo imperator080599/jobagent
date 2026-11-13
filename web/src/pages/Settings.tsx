@@ -97,7 +97,6 @@ export function NumberField({ label, hint, value, onChange, min, max, step, suff
 
 function ApplicationSettings() {
   const mode = useSetting('application.mode');
-  const dryRun = useSetting('application.dryRun');
   return (
     <>
       <Card>
@@ -105,8 +104,8 @@ function ApplicationSettings() {
         <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
           {(
             [
-              { id: 'validation', title: 'Validation', text: "L'agent prépare tout (CV, lettre, réponses) et vous présente un récapitulatif. Rien ne part sans votre accord." },
-              { id: 'autonomous', title: 'Autonome', text: "Les candidatures qui remplissent vos critères et dont tous les champs ont une réponse validée partent automatiquement. Aucune déclaration n'est jamais inventée." },
+              { id: 'validation', title: 'Validation', text: "Chaque offre analysée vous est présentée. Vous décidez, puis l'agent prépare le CV et la lettre, que vous validez avant de postuler." },
+              { id: 'autonomous', title: 'Autonome', text: "Pour les offres qui remplissent vos conditions, l'agent prépare le CV et la lettre sans attendre votre avis sur l'offre. Vous validez toujours les documents, et le dépôt de la candidature reste entre vos mains." },
             ] as const
           ).map((o) => (
             <button
@@ -123,31 +122,17 @@ function ApplicationSettings() {
             </button>
           ))}
         </div>
-        <div className="border-t border-slate-100 px-5 py-4">
-          <Switch
-            checked={Boolean(dryRun.value)}
-            onChange={(v) => dryRun.save(v)}
-            label="Mode test (dry run)"
-            description="Tout est préparé et simulé, mais aucune candidature n'est réellement soumise et aucun message n'est envoyé."
-          />
-        </div>
       </Card>
 
       {mode.value === 'autonomous' && (
-        <SettingCard settingKey="application.autonomous" title="Conditions du mode autonome" description="Une candidature ne part seule que si toutes ces conditions sont réunies.">
+        <SettingCard settingKey="application.autonomous" title="Conditions du mode autonome" description="La préparation des documents ne démarre seule que si toutes ces conditions sont réunies. Une annonce suspecte ou comportant un point bloquant vous est toujours soumise.">
           {(v, set) => (
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-3">
                 <NumberField label="Note ATS minimale" value={v.minAtsScore} min={0} max={20} step={0.5} suffix="/20" onChange={(n) => set({ ...v, minAtsScore: n })} />
                 <NumberField label="Priorité minimale" value={v.minPriority} min={0} max={100} suffix="/100" onChange={(n) => set({ ...v, minPriority: n })} />
-                <NumberField label="Envois par jour (maximum)" value={v.maxPerDay} min={0} max={50} onChange={(n) => set({ ...v, maxPerDay: n })} />
+                <NumberField label="Préparations par jour (maximum)" value={v.maxPerDay} min={0} max={50} onChange={(n) => set({ ...v, maxPerDay: n })} />
               </div>
-              <Switch
-                checked={v.autoApproveDocuments}
-                onChange={(b) => set({ ...v, autoApproveDocuments: b })}
-                label="Approuver automatiquement les documents sans alerte"
-                description="CV et lettre passés par tous les contrôles de véracité sans aucune réserve. Désactivé : vous validez chaque document."
-              />
             </div>
           )}
         </SettingCard>

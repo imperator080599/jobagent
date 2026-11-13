@@ -5,7 +5,7 @@
 //    candidatures), candidature (cette offre seulement), style (règles de rédaction).
 //  - Une offre faiblement notée n'est pas masquée : elle reste consultable, et elle
 //    est tout de même présentée si elle est stratégique ou ajoutée à la main.
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import type { UserContext } from '../core/context.js';
 import { logActivity } from '../core/activity.js';
 import { badRequest, conflict } from '../core/errors.js';
@@ -14,7 +14,7 @@ import { enqueue } from '../core/queue.js';
 import { getSetting } from '../core/settings.js';
 import { normalize } from '../core/text.js';
 import { newId } from '../db/ids.js';
-import { actionItems, feedback, jobs } from '../db/schema.js';
+import { actionItems, feedback, jobs, stageHistory } from '../db/schema.js';
 import { getFact, listSkillFacts, setFact, setSkillFact } from '../profile/facts.js';
 import { skillFactKey } from '../shared/facts.js';
 import { ATS_DECISION_LABELS, isSubmitted, type AtsDecision } from '../shared/stages.js';
@@ -61,7 +61,12 @@ export async function afterAnalysis(ctx: UserContext, job: Job, r: AtsRunResult,
 
   // Mode autonome : uniquement si toutes les conditions fixées par l'utilisateur sont réunies,
   // et jamais pour une annonce suspecte ou comportant un point bloquant.
-  const autoOk = mode === 'autonomous' && score != null && score >= auto.minAtsScore && (job.priorityScore ?? 0) >= auto.minPriority && !flags.injection?.length && !(q.blockers?.length ?? 0) && !r.parsed.scoreConflict;
+  // Plafond quotidien des préparations lancées sans avis préalable.
+  const now = ctx.now();
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const [startedToday] = await ctx.db.select({ n: sql<number>`count(*)::int` }).from(stageHistory).where(and(eq(stageHistory.userId, ctx.userId), eq(stageHistory.toStage, 'cv_in_progress'), eq(stageHistory.actor, 'agent:ats'), gte(stageHistory.at, dayStart)));
+  const underCap = auto.maxPerDay > 0 && (startedToday?.n ?? 0) < auto.maxPerDay;
+  const autoOk = mode === 'autonomous' && underCap && score != null && score >= auto.minAtsScore && (job.priorityScore ?? 0) >= auto.minPriority && !flags.injection?.length && !(q.blockers?.length ?? 0) && !r.parsed.scoreConflict;
   if (autoOk) {
     await setStage(ctx, job.id, 'analyzed', { actor: 'agent:ats', reason, soft: true });
     await setStage(ctx, job.id, 'cv_in_progress', { actor: 'agent:ats', reason: 'mode autonome : conditions réunies', soft: true });
