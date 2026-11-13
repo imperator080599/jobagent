@@ -63,6 +63,7 @@ Ouvrez <http://localhost:4000>, créez le compte propriétaire, puis suivez la m
 | `npm run build` | Construit l'interface dans `dist/` |
 | `npm start` | Démarre l'application (API, interface, planificateur, worker) |
 | `npm test` | Tests unitaires et d'intégration (base Postgres embarquée, IA simulée) |
+| `TEST_DATABASE_URL=postgres://… npm test` | Les mêmes tests sur un vrai serveur Postgres (une base temporaire par fichier de test) |
 | `npm run typecheck` | Vérification des types (serveur et interface) |
 | `npm run db:generate` | Génère une migration après modification du schéma |
 | `npm run db:migrate` | Applique les migrations |

@@ -1,9 +1,11 @@
 # Déploiement
 
 > **État au moment de la livraison : l'application n'est pas déployée.** Ce document décrit la
-> procédure. L'image Docker n'a pas pu être construite dans l'environnement de développement
-> (pas de moteur Docker disponible) ; la commande de démarrage qu'elle exécute, elle, a été
-> vérifiée. Prévoyez une première construction attentive.
+> procédure. Ce qui a été vérifié : le démarrage en mode production sur un serveur PostgreSQL 16
+> (migrations, création du compte avec jeton, parcours complet d'une candidature), l'ensemble des
+> tests automatisés sur ce même serveur, et les scripts de sauvegarde et de restauration.
+> Ce qui ne l'a pas été : la construction de l'image Docker (pas de moteur Docker disponible dans
+> l'environnement de développement) et le service HTTPS. Prévoyez une première construction attentive.
 
 Pour fonctionner ordinateur éteint, l'application a besoin d'une machine toujours allumée :
 un petit serveur virtuel suffit (2 vCPU, 2 à 4 Go de mémoire, 20 Go de disque). Une plateforme

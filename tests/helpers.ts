@@ -1,5 +1,6 @@
 // Outils de test : contexte applicatif complet sur une base Postgres embarquée en
 // mémoire (mêmes migrations qu'en production), horloge et réseau injectables.
+import { randomBytes } from 'node:crypto';
 import type { Hono } from 'hono';
 import { openDb, type DbHandle } from '../src/db/client.js';
 import { loadEnv, type Env } from '../src/env.js';
@@ -22,7 +23,26 @@ export type FetchMock = (url: string, init?: RequestInit) => Promise<Response> |
 
 export async function makeTestEnv(opts: { env?: Partial<Env>; fetch?: FetchMock } = {}): Promise<TestEnv> {
   const env = loadEnv({ nodeEnv: 'test', isProduction: false, isServerless: false, databaseUrl: '', llmProvider: 'mock', setupToken: '', cronSecret: 'test-cron-secret', logLevel: 'error', ...opts.env });
-  const handle = await openDb({ pgliteDir: null });
+  // Par défaut : Postgres embarqué en mémoire. Avec TEST_DATABASE_URL, chaque fichier de test reçoit
+  // sa propre base sur un vrai serveur Postgres (même pilote qu'en production), supprimée ensuite.
+  let handle: DbHandle;
+  let dropDatabase: (() => Promise<void>) | null = null;
+  if (process.env.TEST_DATABASE_URL) {
+    const { default: postgres } = await import('postgres');
+    const name = `jobagent_test_${randomBytes(6).toString('hex')}`;
+    const admin = () => postgres(process.env.TEST_DATABASE_URL!, { max: 1, onnotice: () => {} });
+    const a = admin();
+    await a.unsafe(`create database ${name}`);
+    await a.end({ timeout: 5 });
+    const url = new URL(process.env.TEST_DATABASE_URL);
+    url.pathname = `/${name}`;
+    handle = await openDb({ databaseUrl: url.toString() });
+    dropDatabase = async () => {
+      const b = admin();
+      await b.unsafe(`drop database if exists ${name} with (force)`);
+      await b.end({ timeout: 5 });
+    };
+  } else handle = await openDb({ pgliteDir: null });
   await handle.migrate();
   const clock = {
     // Part de l'heure réelle (cohérent avec les valeurs par défaut de la base) puis n'avance que sur demande.
@@ -47,7 +67,17 @@ export async function makeTestEnv(opts: { env?: Partial<Env>; fetch?: FetchMock 
   };
   const kicks = { count: 0 };
   const app = createApp({ ctx, kick: () => void kicks.count++ });
-  return { ctx, handle, app, clock, kicks, close: () => handle.close() };
+  return {
+    ctx,
+    handle,
+    app,
+    clock,
+    kicks,
+    close: async () => {
+      await handle.close();
+      await dropDatabase?.();
+    },
+  };
 }
 
 /** Client HTTP de test avec gestion des cookies de session. */
