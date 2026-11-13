@@ -266,7 +266,7 @@ export function detectContract(title: string, description = '', hint = ''): Cont
   const head = d.slice(0, 1500);
   if (/\b(type de contrat|contract type|contrat)\s*:?\s*(stage|internship)\b/.test(head) || /\b(stage de \d+ mois|\d+ month internship|6 month internship|internship of)\b/.test(head)) return 'internship';
   if (/\b(type de contrat|contrat)\s*:?\s*(alternance|apprentissage)\b/.test(head)) return 'apprenticeship';
-  if (/\b(cdi|contrat a duree indeterminee|permanent contract|permanent position|unbefristet)\b/.test(d)) return 'cdi';
+  if (/\b(cdi|contrat a duree indeterminee|permanent contract|permanent position|permanent role|unbefristet)\b/.test(d) || /\b(contract|contrat|employment type|type d'emploi)\s*:?\s*permanent\b/.test(head) || /\bpermanent,? full[- ]time\b/.test(head)) return 'cdi';
   if (/\b(cdd|contrat a duree determinee|fixed term contract)\b/.test(head)) return 'cdd';
   return '';
 }

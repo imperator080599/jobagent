@@ -97,20 +97,43 @@ export interface AtsParsed {
 
 const num = (s: string) => Number(s.replace(',', '.'));
 
+const cellsOf = (line: string): string[] => {
+  const cells = line.split('|').map((c) => c.replace(/\*\*/g, '').trim());
+  if (cells[0] === '') cells.shift();
+  if (cells[cells.length - 1] === '') cells.pop();
+  return cells;
+};
+
 /** Lecture déterministe : tableau d'items notés sur 5 et note globale sur 20. */
 export function parseAtsReport(raw: string): { total20: number | null; items: AtsItem[]; source: 'report' | 'items' | 'none' } {
   const items: AtsItem[] = [];
-  for (const line of raw.split('\n')) {
-    if (!line.includes('|')) continue;
-    const cells = line.split('|').map((c) => c.replace(/\*\*/g, '').trim());
-    if (cells[0] === '') cells.shift();
-    if (cells[cells.length - 1] === '') cells.pop();
+  const lines = raw.split('\n');
+  // Colonnes du tableau en cours : la note peut être écrite « 4/5 » dans la cellule, ou « 4 » sous un en-tête « Note /5 ».
+  let scoreCol = -1;
+  let labelCol = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.includes('|')) {
+      scoreCol = -1;
+      labelCol = -1;
+      continue;
+    }
+    const cells = cellsOf(line);
     if (cells.length < 2 || cells.every((c) => /^:?-{2,}:?$/.test(c))) continue;
-    const idx = cells.findIndex((c) => /^(\d(?:[.,]\d{1,2})?)\s*\/\s*5$/.test(c));
+    if (lines[i + 1] && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1]!)) {
+      scoreCol = cells.findIndex((c) => /\/\s*5\b/.test(c) || /^(note|score|notation)\b/i.test(c));
+      labelCol = cells.findIndex((c) => /^(item|crit[èe]re|élément|element|rubrique)/i.test(c));
+      continue;
+    }
+    let idx = cells.findIndex((c) => /^(\d(?:[.,]\d{1,2})?)\s*\/\s*5\b/.test(c));
+    if (idx < 0 && scoreCol >= 0 && /^\d(?:[.,]\d{1,2})?(?!\d)(?!\s*\/\s*(?:[0-46-9]|\d\d))/.test(cells[scoreCol] ?? '')) idx = scoreCol;
     if (idx <= 0) continue;
-    const label = cells.slice(0, idx).filter(Boolean).join(' — ');
+    const score = num(/^(\d(?:[.,]\d{1,2})?)/.exec(cells[idx]!)![1]!);
+    if (score > 5) continue;
+    const before = cells.slice(0, idx).filter((c) => c && !/^\d{1,2}[.)]?$/.test(c));
+    const label = (labelCol >= 0 && labelCol < idx && cells[labelCol] ? cells[labelCol]! : before.join(' — ')).trim();
     if (!label || /^(total|somme|note globale|note finale|score)/i.test(label)) continue;
-    items.push({ label, score5: num(/^(\d(?:[.,]\d{1,2})?)/.exec(cells[idx]!)![1]!), improvement: cells.slice(idx + 1).join(' ').trim() });
+    items.push({ label, score5: score, improvement: (cells[cells.length - 1] === cells[idx] ? '' : cells.slice(idx + 1).pop() ?? '').trim() });
   }
   const totals = [...raw.matchAll(/(\d{1,2}(?:[.,]\d{1,2})?)\s*\/\s*20\b/g)].map((m) => ({ value: num(m[1]!), index: m.index ?? 0 })).filter((t) => t.value >= 0 && t.value <= 20);
   let total: number | null = null;
@@ -211,7 +234,7 @@ export async function runAtsAnalysis(ctx: UserContext, input: AtsRunInput): Prom
   }
   const llm = await getLlm(ctx);
   const pdf = await cvPdf(ctx, cv);
-  const res = await llm.text({ purpose: 'ats.analyze', tier: 'main', system: ATS_SYSTEM, prompt: filled.text, documents: pdf ? [{ mediaType: 'application/pdf', data: pdf }] : undefined, maxTokens: 12_000, effort: 'high', jobId: jobId ?? undefined });
+  const res = await llm.text({ purpose: 'ats.analyze', tier: 'main', system: ATS_SYSTEM, prompt: filled.text, documents: pdf ? [{ mediaType: 'application/pdf', data: pdf }] : undefined, maxTokens: 24_000, effort: 'high', jobId: jobId ?? undefined });
   if (res.refused || !res.text.trim()) {
     if (jobId) {
       await ctx.db.insert(atsAnalyses).values({ id: newId('ats'), userId: ctx.userId, jobId, cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: res.model, rawOutput: res.text, status: 'refused' });
@@ -221,7 +244,7 @@ export async function runAtsAnalysis(ctx: UserContext, input: AtsRunInput): Prom
   const parsed = await extractAtsReport(ctx, res.text, jobId ?? undefined);
   const thresholds = await getSetting(ctx.db, ctx.userId, 'ats.thresholds');
   const decision = parsed.total20 == null ? null : atsDecision(parsed.total20, thresholds);
-  const meta = { ...parsed, slots: { cv: filled.cv, offer: filled.offer }, pdfAttached: Boolean(pdf), truncated: res.stopReason === 'max_tokens', costUsd: res.costUsd } as unknown as Record<string, unknown>;
+  const meta = { ...parsed, slots: { cv: filled.cv, offer: filled.offer }, pdfAttached: Boolean(pdf) && llm.provider !== 'claude-cli', truncated: res.stopReason === 'max_tokens', costUsd: res.costUsd } as unknown as Record<string, unknown>;
   if (!jobId) {
     // Évaluation du CV seul : rien n'est rattaché à une offre ; le résultat est rendu sans être stocké comme analyse d'offre.
     const analysis = { id: newId('ats'), userId: ctx.userId, jobId: '', cvVersionId: cv.id, promptId: prompt.id, promptSha: prompt.sha256, inputHash, model: res.model, rawOutput: res.text, parsed: meta, score: parsed.total20, decision: decision ?? '', userNote: input.note ?? '', status: 'ok' as const, createdAt: ctx.now() };

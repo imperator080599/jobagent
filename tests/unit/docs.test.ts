@@ -9,7 +9,7 @@ import { closing, formatLetterDate, salutation } from '../../src/docs/letter-con
 import { analyzeLetterTemplate, renderLetter } from '../../src/docs/letter-template.js';
 import { checkRenderedDocument, measurePdf, unexpectedFonts } from '../../src/docs/qa.js';
 import { parseCvHeuristic } from '../../src/profile/cv-parse.js';
-import { type CvData, parseMarkup, stripMarkup } from '../../src/shared/cv.js';
+import { type CvData, cvToText, emptyCv, parseMarkup, stripMarkup } from '../../src/shared/cv.js';
 
 const caps = await documentCapabilities();
 const withOffice = caps.office && caps.poppler ? it : it.skip;
@@ -318,5 +318,27 @@ describe('mise en valeur balisée', () => {
     expect(pageToText(header, { markup: true })).toBe('**Mazars France**    Paris, France');
     // Ligne entièrement en gras : aucune balise (la mise en forme est celle du paragraphe).
     expect(pageToText([it('EDUCATION', 277, 50, true)], { markup: true })).toBe('EDUCATION');
+  });
+});
+
+describe('texte brut du CV', () => {
+  it('ne laisse aucun astérisque, même quand une mise en valeur s’arrête au milieu d’un mot', () => {
+    expect(stripMarkup('*a highly selective post-*secondary programme')).toBe('a highly selective post-secondary programme');
+    expect(stripMarkup('**Reviewed** DCF tests and *italic* words')).toBe('Reviewed DCF tests and italic words');
+    expect(stripMarkup('Marge 5 * 3 = 15')).toBe('Marge 5 * 3 = 15');
+  });
+
+  it('n’ajoute aucun titre absent du document d’origine et emploie la langue du CV', () => {
+    const cv = emptyCv('en');
+    cv.identity.fullName = 'Camille Durand';
+    cv.summary = 'Senior auditor moving to transaction services.';
+    cv.experiences = [{ id: 'exp_1', company: 'Hartwell', title: 'Senior Auditor', location: '', start: '', end: '', dates: '2021 – Present', contract: '', summary: '', bullets: [{ id: 'exp_1.b1', text: '**Reviewed** revenue contracts.' }] }];
+    const text = cvToText(cv);
+    expect(text).not.toContain('PROFIL');
+    expect(text).toContain('Camille Durand\n\nSenior auditor moving to transaction services.\n\nWORK EXPERIENCE');
+    expect(text).not.toContain('*');
+    cv.titles = { summary: 'PROFILE', experiences: 'CAREER HISTORY' };
+    expect(cvToText(cv)).toContain('PROFILE\nSenior auditor');
+    expect(cvToText(cv)).toContain('CAREER HISTORY');
   });
 });

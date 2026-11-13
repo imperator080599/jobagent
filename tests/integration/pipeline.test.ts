@@ -94,6 +94,15 @@ describe('prompt ATS de l’utilisateur', () => {
     // Sans total écrit : somme des items rapportée sur 20.
     expect(parseAtsReport('| A | 4/5 | x |\n| B | 3/5 | y |\n| C | 5/5 | z |')).toMatchObject({ total20: 16, source: 'items' });
     expect(parseAtsReport('Aucune note.').total20).toBeNull();
+    // Forme observée avec un modèle réel : colonne « Note /5 », note en gras sans « /5 », mention entre parenthèses.
+    const real = '| # | Item | Note /5 | Constat | Point d’amélioration |\n|---|---|---|---|---|\n| 1 | **Titre clair et lisible** | **3** | Long. | Raccourcir. |\n| 2 | **Format du fichier** | **4** *(provisoire)* | Texte extractible. | Exporter en PDF. |\n| 3 | **Mots-clés** | **2,5** | 15 présents. | Intégrer. |\n\n**Total : 9,5/15, soit une note ajustée de 12,7/20.**\n\n| Mot-clé | Présent |\n|---|---|\n| IFRS | Oui |';
+    const parsedReal = parseAtsReport(real);
+    expect(parsedReal.items).toEqual([
+      { label: 'Titre clair et lisible', score5: 3, improvement: 'Raccourcir.' },
+      { label: 'Format du fichier', score5: 4, improvement: 'Exporter en PDF.' },
+      { label: 'Mots-clés', score5: 2.5, improvement: 'Intégrer.' },
+    ]);
+    expect(parsedReal.total20).toBe(12.7);
   });
 });
 

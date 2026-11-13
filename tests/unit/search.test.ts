@@ -84,6 +84,7 @@ describe('contrat, niveau, expérience', () => {
     expect(detectContract('Alternance Contrôle de gestion')).toBe('apprenticeship');
     expect(detectContract('Financial Analyst', 'Nous proposons un CDI basé à Paris.')).toBe('cdi');
     expect(detectContract('Financial Analyst', 'Rejoignez une équipe internationale.')).toBe('');
+    expect(detectContract('Senior Associate', 'Company: X\nLocation: Luxembourg\nContract: Permanent, full-time\n\nAbout the role')).toBe('cdi');
     // Un mot du corps de l'annonce ne suffit pas à requalifier un poste permanent.
     expect(detectContract('Senior Analyst - CDI', 'Vous encadrerez un stagiaire.')).toBe('cdi');
   });

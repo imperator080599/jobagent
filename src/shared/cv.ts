@@ -190,7 +190,13 @@ export function normalizeMarkup(text: string): string {
 
 /** Retire la mise en valeur (**gras**, *italique*) d'un texte. */
 export function stripMarkup(text: string): string {
-  return text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?![*\w])/g, '$1$2');
+  return (
+    text
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/(^|[^*\w])\*(?!\s)([^*\n]+?)\*(?![*\w])/g, '$1$2')
+      // Balise restante collée à un mot (italique ouvert ou fermé au milieu d'un mot) : jamais d'astérisque dans un texte brut.
+      .replace(/\*+(?=\S)|(?<=\S)\*+/g, '')
+  );
 }
 
 export interface MarkupSpan {
@@ -216,6 +222,13 @@ export function parseMarkup(text: string): MarkupSpan[] {
   return out.filter((s) => s.text.length > 0);
 }
 
+const SECTION_TITLES: Record<string, { experiences: string; education: string; skills: string; languages: string; certifications: string }> = {
+  fr: { experiences: 'EXPÉRIENCES PROFESSIONNELLES', education: 'FORMATION', skills: 'COMPÉTENCES', languages: 'LANGUES', certifications: 'CERTIFICATIONS' },
+  en: { experiences: 'WORK EXPERIENCE', education: 'EDUCATION', skills: 'SKILLS', languages: 'LANGUAGES', certifications: 'CERTIFICATIONS' },
+  es: { experiences: 'EXPERIENCIA PROFESIONAL', education: 'FORMACIÓN', skills: 'COMPETENCIAS', languages: 'IDIOMAS', certifications: 'CERTIFICACIONES' },
+  de: { experiences: 'BERUFSERFAHRUNG', education: 'AUSBILDUNG', skills: 'KENNTNISSE', languages: 'SPRACHEN', certifications: 'ZERTIFIKATE' },
+};
+
 /** Texte brut du CV (pour les prompts, la recherche de mots-clés et les contrôles). La mise en valeur est retirée. */
 export function cvToText(cv: CvData): string {
   return stripMarkup(cvToMarkedText(cv));
@@ -230,10 +243,13 @@ export function cvToMarkedText(cv: CvData): string {
   const contact = [id.email, id.phone, id.location, id.linkedin, id.website, ...(id.extra ?? [])].filter(Boolean);
   if (contact.length) L.push(contact.join(' | '));
   const period = (s?: string, e?: string, display?: string) => display || [fmtDate(s, cv.language), fmtDate(e, cv.language)].filter(Boolean).join(' – ');
+  // Titres par défaut dans la langue du CV, pour les rubriques dont le document d'origine ne donne pas le titre.
+  const defaults = SECTION_TITLES[cv.language] ?? SECTION_TITLES.en!;
   for (const section of cv.sectionOrder) {
-    if (section === 'summary' && cv.summary) L.push('', cv.titles?.summary || 'PROFIL', cv.summary);
+    // Une accroche sans titre dans le document d'origine reste sans titre : rien n'est ajouté au CV.
+    if (section === 'summary' && cv.summary) L.push('', ...(cv.titles?.summary ? [cv.titles.summary] : []), cv.summary);
     if (section === 'experiences' && cv.experiences.length) {
-      L.push('', cv.titles?.experiences || 'EXPÉRIENCES PROFESSIONNELLES');
+      L.push('', cv.titles?.experiences || defaults.experiences);
       for (const e of cv.experiences) {
         L.push(`${e.title} — ${e.company}${e.location ? ` (${e.location})` : ''}${period(e.start, e.end, e.dates) ? ` | ${period(e.start, e.end, e.dates)}` : ''}`);
         if (e.summary) L.push(e.summary);
@@ -241,22 +257,22 @@ export function cvToMarkedText(cv: CvData): string {
       }
     }
     if (section === 'education' && cv.education.length) {
-      L.push('', cv.titles?.education || 'FORMATION');
+      L.push('', cv.titles?.education || defaults.education);
       for (const e of cv.education) {
         L.push(`${e.degree}${e.field ? `, ${e.field}` : ''} — ${e.school}${e.location ? ` (${e.location})` : ''}${period(e.start, e.end, e.dates) ? ` | ${period(e.start, e.end, e.dates)}` : ''}`);
         for (const b of e.details) L.push(b.kind === 'text' ? b.text : `- ${b.text}`);
       }
     }
     if (section === 'skills' && cv.skills.length) {
-      L.push('', cv.titles?.skills || 'COMPÉTENCES');
+      L.push('', cv.titles?.skills || defaults.skills);
       for (const s of cv.skills) L.push(`${s.label ? `${s.label} : ` : ''}${s.items.join(', ')}`);
     }
     if (section === 'languages' && cv.languages.length) {
-      L.push('', cv.titles?.languages || 'LANGUES');
+      L.push('', cv.titles?.languages || defaults.languages);
       for (const l of cv.languages) L.push(`${l.language}${l.level ? ` : ${l.level}` : ''}${l.certification ? ` (${l.certification})` : ''}`);
     }
     if (section === 'certifications' && cv.certifications.length) {
-      L.push('', cv.titles?.certifications || 'CERTIFICATIONS');
+      L.push('', cv.titles?.certifications || defaults.certifications);
       for (const c of cv.certifications) L.push(`${c.name}${c.issuer ? ` — ${c.issuer}` : ''}${c.date ? ` (${c.date})` : ''}`);
     }
     if (section === 'extras') {
