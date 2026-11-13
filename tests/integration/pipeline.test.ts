@@ -119,6 +119,9 @@ describe('prompt ATS de l’utilisateur', () => {
     expect(parseAtsReport('Note globale : 12/20. Après optimisation, le CV pourrait atteindre 16/20.')).toMatchObject({ total20: 12, projected20: 16 });
     expect(parseAtsReport('Votre CV devrait viser 18/20.\n\n**Note globale ajustée : 11,5/20**')).toMatchObject({ total20: 11.5, projected20: 18 });
     expect(parseAtsReport('**Note globale ajustée : 11,5/20**').projected20).toBeNull();
+    // Forme observée lors d'une analyse réelle : ligne « Note ajustée » et projection en fourchette.
+    const ranged = '| | **Total** | **19,5 / 30** | | |\n| | **Note ajustée** | **13 / 20** | | Après corrections, l’objectif réaliste est de 17 à 18/20. |';
+    expect(parseAtsReport(ranged)).toMatchObject({ total20: 13, projected20: 18, projectedRange: [17, 18], confidence: 'row' });
   });
 });
 

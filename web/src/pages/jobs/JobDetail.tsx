@@ -85,7 +85,7 @@ function AtsScores({ analysis, tailoredAfter }: { analysis: Detail['analyses'][n
       </div>
       <div className="rounded-lg bg-slate-50 p-3">
         <p className="text-[11.5px] text-slate-500">Note estimée après optimisation</p>
-        <p className="mt-0.5 text-lg font-semibold text-slate-500 tabular-nums">{fmt20(analysis.projectedScore)}</p>
+        <p className="mt-0.5 text-lg font-semibold text-slate-500 tabular-nums">{analysis.parsed?.projectedRange ? `${analysis.parsed.projectedRange[0].toLocaleString('fr-FR')}–${fmt20(analysis.parsed.projectedRange[1])}` : fmt20(analysis.projectedScore)}</p>
         <p className="text-[11px] text-slate-400">{analysis.projectedScore != null ? 'Projection du rapport, non mesurée' : 'Le rapport n’en donne pas'}{tailoredAfter != null ? ` · mesurée sur le CV personnalisé : ${fmt20(tailoredAfter)}` : ''}</p>
       </div>
       <div className="rounded-lg bg-slate-50 p-3">

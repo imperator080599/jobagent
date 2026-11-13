@@ -50,6 +50,8 @@ export interface AtsParsed {
   total20: number | null;
   /** Note que le rapport estime atteignable après optimisation (jamais confondue avec la note attribuée). */
   projected20: number | null;
+  /** Fourchette annoncée par le rapport (« 17 à 18/20 »), le cas échéant. */
+  projectedRange?: [number, number] | null;
   items: AtsItem[];
   missingKeywords: string[];
   alerts: string[];
@@ -70,7 +72,7 @@ const cellsOf = (line: string): string[] => {
 };
 
 /** Lecture déterministe : tableau d'items notés sur 5 et note globale sur 20. */
-export function parseAtsReport(raw: string): { total20: number | null; projected20: number | null; items: AtsItem[]; source: 'report' | 'items' | 'none'; candidates: number[]; confidence: 'row' | 'line' | 'fallback' } {
+export function parseAtsReport(raw: string): { total20: number | null; projected20: number | null; projectedRange: [number, number] | null; items: AtsItem[]; source: 'report' | 'items' | 'none'; candidates: number[]; confidence: 'row' | 'line' | 'fallback' } {
   const items: AtsItem[] = [];
   const lines = raw.split('\n');
   // Colonnes du tableau en cours : la note peut être écrite « 4/5 » dans la cellule, ou « 4 » sous un en-tête « Note /5 ».
@@ -108,16 +110,19 @@ export function parseAtsReport(raw: string): { total20: number | null; projected
   const lineStart = (i: number) => raw.lastIndexOf('\n', i) + 1;
   const lineOf = (i: number) => raw.slice(lineStart(i), raw.indexOf('\n', i) === -1 ? raw.length : raw.indexOf('\n', i));
   const hypothetical = (t: { index: number }) => HYPOTHETICAL.test(raw.slice(Math.max(lineStart(t.index), t.index - 90), t.index));
-  // Note projetée : une note sur 20 annoncée au conditionnel ou « après optimisation ».
+  // Note projetée : une note sur 20 annoncée au conditionnel ou « après optimisation » (« 17 à 18/20 » : fourchette conservée).
   const projectedHits = all.filter((t) => hypothetical(t));
-  const projected20 = projectedHits.length ? projectedHits[projectedHits.length - 1]!.value : null;
+  const lastProjected = projectedHits.length ? projectedHits[projectedHits.length - 1]! : null;
+  const projected20 = lastProjected?.value ?? null;
+  const rangeLow = lastProjected ? /(\d{1,2}(?:[.,]\d{1,2})?)\s*(?:à|-|–|to|a)\s*$/i.exec(raw.slice(Math.max(0, lastProjected.index - 14), lastProjected.index)) : null;
+  const projectedRange: [number, number] | null = rangeLow && projected20 != null && num(rangeLow[1]!) < projected20 ? [num(rangeLow[1]!), projected20] : null;
   let total: number | null = null;
   let confidence: 'row' | 'line' | 'fallback' = 'fallback';
   // 1. Ligne « TOTAL » d'un tableau : la première cellule qui porte une note sur 20 (« 19,5/30 → 13/20 » donne 13).
   for (const line of lines) {
     if (!line.includes('|')) continue;
     const cells = cellsOf(line);
-    if (!cells.some((c) => /^(total|note (globale|finale)|score (global|final)|somme)\b/i.test(c))) continue;
+    if (!cells.some((c) => /^(total|note (globale|finale|ajust[ée]+e?)|score (global|final|ajust)|somme)\b/i.test(c))) continue;
     // La cellule de la note attribuée, jamais celle d'un commentaire de projection.
     const cell = cells.find((c) => /\d\s*\/\s*20\b/.test(c) && !/(devrait|pourrait|après|estim|optimis|would|could|after)/i.test(c));
     const found = cell ? [...cell.matchAll(/(\d{1,2}(?:[.,]\d{1,2})?)\s*\/\s*20\b/g)] : [];
@@ -136,14 +141,14 @@ export function parseAtsReport(raw: string): { total20: number | null; projected
   }
   // 3. À défaut, la dernière note sur 20 qui n'est pas une projection.
   if (total == null && all.length) total = (all.filter((t) => !hypothetical(t)).pop() ?? all[all.length - 1]!).value;
-  if (total != null) return { total20: total, projected20, items, source: 'report', candidates, confidence };
+  if (total != null) return { total20: total, projected20, projectedRange, items, source: 'report', candidates, confidence };
   const scored = items.filter((i) => i.score5 != null);
   if (scored.length >= 3) {
     // « Ajuste la somme des points sur 20 » : somme des notes rapportée au maximum possible.
     const sum = scored.reduce((a, i) => a + (i.score5 ?? 0), 0);
-    return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, projected20, items, source: 'items', candidates, confidence: 'fallback' };
+    return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, projected20, projectedRange, items, source: 'items', candidates, confidence: 'fallback' };
   }
-  return { total20: null, projected20, items, source: 'none', candidates, confidence: 'fallback' };
+  return { total20: null, projected20, projectedRange, items, source: 'none', candidates, confidence: 'fallback' };
 }
 
 const AtsExtract = z.object({
@@ -181,6 +186,7 @@ export async function extractAtsReport(ctx: UserContext, raw: string, jobId?: st
   return {
     total20,
     projected20: projected20 != null && total20 != null && Math.abs(projected20 - total20) < 0.05 ? null : projected20,
+    projectedRange: det.projectedRange,
     items: det.items.length >= (ext?.items.length ?? 0) ? det.items : (ext?.items ?? []),
     missingKeywords: [...new Set((ext?.missingKeywords ?? []).map((k) => k.trim()).filter(Boolean))],
     alerts: ext?.alerts ?? [],
