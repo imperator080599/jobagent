@@ -55,6 +55,42 @@ export function settingsRoutes(deps: AppDeps) {
     return c.json({ ok: true });
   });
 
+  /** Envoie un message d'essai sur les canaux actifs, et montre le résumé du jour tel qu'il serait envoyé. */
+  r.post('/notifications/test', sessionOnly, async (c) => {
+    const uctx = c.get('uctx');
+    const { buildDigest, enabledChannels, notify } = await import('../../notify/index.js');
+    const channels = await enabledChannels(uctx);
+    if (!channels.length) throw badRequest("Aucun canal de notification n'est activé et renseigné.");
+    const digest = await buildDigest(uctx);
+    const res = await notify(uctx, { kind: 'test', title: 'JobAgent — message d\'essai', body: `Vos notifications fonctionnent. Voici le résumé du jour :\n\n${digest.body}`, link: '/', dedupKey: `test:${ctx.now().getTime()}` }, { force: true });
+    return c.json({ channels, sent: res.sent, failed: res.failed });
+  });
+  r.get('/notifications/digest', async (c) => {
+    const { buildDigest } = await import('../../notify/index.js');
+    return c.json(await buildDigest(c.get('uctx')));
+  });
+
+  /** Export complet des données (JSON). Les secrets n'y figurent jamais. */
+  r.get('/data/export', sessionOnly, async (c) => {
+    const { exportUserData } = await import('../../core/export.js');
+    const data = await exportUserData(c.get('uctx'), { files: c.req.query('files') === '1' });
+    await logActivity(ctx.db, { userId: c.get('user').id, actor: 'user', action: 'data.exported', summary: 'Export des données téléchargé' });
+    return new Response(JSON.stringify(data, null, 1), { headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="jobagent-export-${ctx.now().toISOString().slice(0, 10)}.json"`, 'cache-control': 'no-store' } });
+  });
+  /** Effacement des données, après vérification du mot de passe. */
+  r.post('/data/delete', sessionOnly, async (c) => {
+    const input = await body(c, z.object({ scope: z.enum(['search', 'all']), password: z.string().min(1) }));
+    const { verifyPassword } = await import('../../auth/passwords.js');
+    if (!(await verifyPassword(input.password, c.get('user').passwordHash))) throw badRequest('Mot de passe incorrect.');
+    const { deleteUserData } = await import('../../core/export.js');
+    const removed = await deleteUserData(c.get('uctx'), input.scope);
+    if (input.scope === 'all') {
+      const { bootstrapUser } = await import('../../profile/bootstrap.js');
+      await bootstrapUser(ctx, c.get('user').id);
+    }
+    return c.json({ ok: true, removed });
+  });
+
   r.delete('/secrets/:key', sessionOnly, async (c) => {
     const key = c.req.param('key') as SecretKey;
     if (!SECRET_KEYS.includes(key)) throw badRequest(`Secret inconnu : ${key}`);

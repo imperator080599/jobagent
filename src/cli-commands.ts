@@ -83,3 +83,20 @@ registerCommand('seed-private', 'Charge les documents du dossier ./private (--em
   const drafts = (await listCvVersions(ctx.db, user.id, { kinds: ['master'] })).filter((v) => v.status === 'draft').length;
   console.log(`Terminé. ${drafts} brouillon(s) de CV master en attente de validation.`);
 });
+
+registerCommand('export', "Exporte toutes les données d'un compte dans un fichier JSON (--email compte --out fichier [--files])", async (args) => {
+  const { ctx } = await getRuntime({ migrate: true });
+  const email = arg(args, 'email');
+  const out = arg(args, 'out');
+  if (!email || !out) throw new Error('Usage : export --email adresse@exemple.com --out sauvegarde.json [--files]');
+  const { users } = await import('./db/schema.js');
+  const { eq } = await import('drizzle-orm');
+  const { forUser } = await import('./core/context.js');
+  const { exportUserData } = await import('./core/export.js');
+  const { writeFileSync } = await import('node:fs');
+  const [user] = await ctx.db.select().from(users).where(eq(users.email, email.trim().toLowerCase()));
+  if (!user) throw new Error(`Compte introuvable : ${email}`);
+  const data = await exportUserData(forUser(ctx, user.id), { files: args.includes('--files') });
+  writeFileSync(path.resolve(out), JSON.stringify(data));
+  console.log(`Export écrit dans ${path.resolve(out)} (${Object.keys(data).length} rubriques, ${(data.jobs as unknown[]).length} offres).`);
+});

@@ -1,8 +1,8 @@
 // Synthèses pour l'interface : compteurs de navigation, consommation IA.
-import { and, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm';
 import { listActivity } from '../../core/activity.js';
 import { getSetting } from '../../core/settings.js';
-import { actionItems, applications, jobs, llmCalls, tasks } from '../../db/schema.js';
+import { actionItems, applications, atsAnalyses, jobs, llmCalls, tasks } from '../../db/schema.js';
 import { llmSpend } from '../../llm/index.js';
 import { STAGE_GROUPS, SUBMITTED_STAGES } from '../../shared/stages.js';
 import { type AppDeps, router } from '../http.js';
@@ -98,6 +98,62 @@ export function overviewRoutes(deps: AppDeps) {
       blocked: blocked.map((b) => ({ type: b.type, reason: b.lastError.replace(/^\[[^\]]+\]\s*/, '') })),
       llm: { ...spend, monthlyBudget: budget.monthlyUsd, dailyBudget: budget.dailyUsd },
       activity: activity.map((a) => ({ id: a.id, at: a.at, actor: a.actor, action: a.action, summary: a.summary, level: a.level, entityType: a.entityType, entityId: a.entityId })),
+    });
+  });
+
+  /** Analytique : entonnoir, taux de réponse, sources utiles, mots-clés les plus souvent manquants, coûts. */
+  r.get('/analytics', async (c) => {
+    const userId = c.get('user').id;
+    const [byStage, bySource, scores, analyses, apps, costs] = await Promise.all([
+      ctx.db.select({ stage: jobs.stage, n: sql<number>`count(*)::int` }).from(jobs).where(eq(jobs.userId, userId)).groupBy(jobs.stage),
+      ctx.db.execute(sql`select s.name as name, s.type as type, count(distinct j.id)::int as jobs, count(distinct j.id) filter (where j.stage not in ('filtered', 'expired', 'new'))::int as kept, count(distinct j.id) filter (where j.stage in ('sent', 'confirmed', 'interview_hr', 'interview_tech', 'offer', 'rejected', 'no_response', 'follow_up_needed'))::int as applied from sources s left join job_sightings g on g.source_id = s.id left join jobs j on j.id = g.job_id where s.user_id = ${userId} group by s.id, s.name, s.type order by jobs desc`),
+      ctx.db.select({ avgAts: sql<number>`avg(${jobs.atsScore})::float8`, avgRelevance: sql<number>`avg(${jobs.relevanceScore})::float8`, avgFit: sql<number>`avg(${jobs.fitScore})::float8`, analyzed: sql<number>`count(${jobs.atsScore})::int` }).from(jobs).where(eq(jobs.userId, userId)),
+      ctx.db.select({ parsed: atsAnalyses.parsed }).from(atsAnalyses).where(and(eq(atsAnalyses.userId, userId), eq(atsAnalyses.status, 'ok'))).orderBy(desc(atsAnalyses.createdAt)).limit(200),
+      ctx.db.select({ submittedAt: applications.submittedAt, confirmedAt: applications.confirmedAt, lastActivityAt: applications.lastActivityAt, outcome: applications.outcome, stage: jobs.stage, atsScore: jobs.atsScore }).from(applications).innerJoin(jobs, eq(jobs.id, applications.jobId)).where(and(eq(applications.userId, userId), isNotNull(applications.submittedAt))),
+      ctx.db.select({ purpose: llmCalls.purpose, usd: sql<number>`coalesce(sum(${llmCalls.costUsd}), 0)::float8`, calls: sql<number>`count(*)::int` }).from(llmCalls).where(eq(llmCalls.userId, userId)).groupBy(llmCalls.purpose),
+    ]);
+    const counts = Object.fromEntries(byStage.map((s) => [s.stage, s.n])) as Record<string, number>;
+    const sum = (stages: readonly string[]) => stages.reduce((n, s) => n + (counts[s] ?? 0), 0);
+    const total = byStage.reduce((n, s) => n + s.n, 0);
+    const submitted = sum(SUBMITTED_STAGES);
+    const interviewsOrBetter = (counts.interview_hr ?? 0) + (counts.interview_tech ?? 0) + (counts.offer ?? 0);
+    const answered = apps.filter((a) => ['interview_hr', 'interview_tech', 'offer', 'rejected'].includes(a.stage)).length;
+    // Mots-clés le plus souvent signalés absents par vos analyses ATS : ce qu'il vaut la peine d'acquérir ou de mieux formuler.
+    const freq = new Map<string, { label: string; n: number }>();
+    for (const a of analyses) {
+      for (const k of ((a.parsed as { missingKeywords?: string[] } | null)?.missingKeywords ?? []).slice(0, 40)) {
+        const key = k.trim().toLowerCase();
+        if (!key || key.length > 60) continue;
+        const e = freq.get(key) ?? { label: k.trim(), n: 0 };
+        e.n++;
+        freq.set(key, e);
+      }
+    }
+    const withInterview = apps.filter((a) => ['interview_hr', 'interview_tech', 'offer'].includes(a.stage) && a.atsScore != null);
+    const without = apps.filter((a) => !['interview_hr', 'interview_tech', 'offer'].includes(a.stage) && a.atsScore != null);
+    const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
+    return c.json({
+      funnel: [
+        { label: 'Offres trouvées', value: total },
+        { label: 'Retenues après sélection', value: total - (counts.filtered ?? 0) - (counts.expired ?? 0) - (counts.new ?? 0) },
+        { label: 'Analysées (ATS)', value: scores[0]?.analyzed ?? 0 },
+        { label: 'Candidatures envoyées', value: submitted },
+        { label: 'Entretiens obtenus', value: interviewsOrBetter },
+        { label: 'Offres reçues', value: counts.offer ?? 0 },
+      ],
+      rates: {
+        responseRate: submitted ? Math.round((answered / submitted) * 100) : null,
+        interviewRate: submitted ? Math.round((interviewsOrBetter / submitted) * 100) : null,
+        avgAts: scores[0]?.avgAts != null ? Math.round(scores[0].avgAts * 10) / 10 : null,
+        avgRelevance: scores[0]?.avgRelevance != null ? Math.round(scores[0].avgRelevance) : null,
+        avgFit: scores[0]?.avgFit != null ? Math.round(scores[0].avgFit) : null,
+        avgAtsWithInterview: avg(withInterview.map((a) => a.atsScore!)),
+        avgAtsWithoutInterview: avg(without.map((a) => a.atsScore!)),
+      },
+      sources: (bySource as unknown as { rows?: unknown[] }).rows ?? bySource,
+      missingKeywords: [...freq.values()].filter((k) => k.n > 1 || analyses.length < 4).sort((a, b) => b.n - a.n).slice(0, 25),
+      analysesCount: analyses.length,
+      costs: { total: costs.reduce((a, r) => a + r.usd, 0), byPurpose: costs.sort((a, b) => b.usd - a.usd), perApplication: submitted ? costs.reduce((a, r) => a + r.usd, 0) / submitted : null },
     });
   });
 

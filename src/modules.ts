@@ -16,6 +16,7 @@ import './profile/index.js';
 import './pipeline/index.js';
 import './search/index.js';
 import './tracker/index.js';
+import './notify/index.js';
 
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/profile', profileRoutes(deps)));
