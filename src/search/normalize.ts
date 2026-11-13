@@ -180,6 +180,18 @@ const CITIES: Record<string, [string, string]> = {
 const COUNTRY_LOOKUP = new Map<string, string>();
 for (const [code, names] of Object.entries(COUNTRIES)) for (const n of names) COUNTRY_LOOKUP.set(n, code);
 
+/** Code ISO d'un nom de pays (« France », « Royaume-Uni », « LU »), ou null. */
+export function countryCodeOf(text: string): string | null {
+  const t = text.trim();
+  if (/^[A-Za-z]{2}$/.test(t) && COUNTRIES[t.toUpperCase()]) return t.toUpperCase();
+  return COUNTRY_LOOKUP.get(normalize(t)) ?? null;
+}
+
+/** Noms usuels d'un pays (pour reconnaître une option « France » ou « Luxembourg » dans une liste). */
+export function countryNames(code: string): string[] {
+  return COUNTRIES[code.toUpperCase()] ?? [];
+}
+
 export interface ParsedLocation {
   city: string;
   country: string;

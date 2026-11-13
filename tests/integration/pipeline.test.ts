@@ -408,7 +408,10 @@ describe('candidature', () => {
     expect(approved.status).toBe(200);
     expect(approved.data.cv.status).toBe('approved');
     expect(approved.data.letter.status).toBe('approved');
-    expect(approved.data.application).toMatchObject({ mode: 'manual', authorizedBy: 'user', cvVersionId: approved.data.cv.id, letterId: approved.data.letter.id });
+    // Validation sans autorisation d'envoi : remplissage assisté, l'envoi reste à l'utilisateur.
+    expect(approved.data.application).toMatchObject({ mode: 'assisted', authorizedBy: 'user', cvVersionId: approved.data.cv.id, letterId: approved.data.letter.id });
+    // Le moteur de candidature prend le relais aussitôt.
+    expect((await t.ctx.db.select().from(tasks).where(and(eq(tasks.type, 'application.run'), eq(tasks.userId, userId)))).length).toBe(1);
     // Validation ≠ envoi : l'offre reste « prête à candidater » tant que l'envoi n'est pas déclaré.
     expect((await jobRow(job!.id)).stage).toBe('ready_to_apply');
     const inbox = (await api.get('/api/inbox')).data.items;

@@ -23,6 +23,55 @@ export const SETTINGS = {
   },
   /** Mode TEST : tout est préparé, rien n'est réellement soumis ni envoyé. */
   'application.dryRun': { schema: z.boolean(), default: false },
+  /**
+   * AUTOPILOT : règles validées une fois pour toutes. Une candidature qui les remplit toutes est
+   * remplie et envoyée sans validation individuelle, dans la limite de la politique de chaque plateforme
+   * (jamais au-delà). Les autres passent en mode VALIDATION.
+   */
+  'application.autopilot': {
+    schema: z.object({
+      enabled: z.boolean(),
+      /** Envoi automatique autorisé par plateforme ; absent = remplissage seulement (envoi par vous). */
+      platforms: z.record(z.string(), z.enum(['auto', 'prefill', 'manual'])),
+      countries: z.array(z.string()),
+      contracts: z.array(z.string()),
+      titleKeywords: z.array(z.string()),
+      excludeKeywords: z.array(z.string()),
+      minAtsScore: z.number().min(0).max(20),
+      minPriority: z.number().min(0).max(100),
+      requireLetter: z.boolean(),
+      maxPerDay: z.number().int().min(0).max(50),
+      maxPerWeek: z.number().int().min(0).max(200),
+      /** Réponses déduites (ex. « comment avez-vous connu l'offre » = source réelle de l'offre) acceptées sans validation. */
+      allowDerivedAnswers: z.boolean(),
+      /** Réponses rédigées à partir de votre lettre validée (questions de motivation). */
+      allowLetterAnswers: z.boolean(),
+      consents: z.object({
+        /** Accepter la politique de confidentialité du recruteur (traitement de la candidature). */
+        privacyPolicy: z.boolean(),
+        /** Cocher « je certifie l'exactitude des informations » (toutes vos réponses étant validées). */
+        accuracyAttestation: z.boolean(),
+        /** Questionnaires de diversité : « je ne souhaite pas répondre » quand l'option existe. */
+        declineDemographics: z.boolean(),
+      }),
+    }),
+    default: {
+      enabled: false,
+      platforms: {} as Record<string, 'auto' | 'prefill' | 'manual'>,
+      countries: [] as string[],
+      contracts: [] as string[],
+      titleKeywords: [] as string[],
+      excludeKeywords: [] as string[],
+      minAtsScore: 15,
+      minPriority: 60,
+      requireLetter: false,
+      maxPerDay: 5,
+      maxPerWeek: 20,
+      allowDerivedAnswers: true,
+      allowLetterAnswers: false,
+      consents: { privacyPolicy: false, accuracyAttestation: false, declineDemographics: true },
+    },
+  },
   'ats.thresholds': {
     schema: z.object({ excellent: z.number(), interesting: z.number(), limited: z.number() }),
     default: { excellent: 15, interesting: 13, limited: 11 },

@@ -744,6 +744,14 @@ export const applicationAttempts = pgTable(
     driver: text('driver').$type<'browser' | 'extension' | 'manual'>().notNull().default('browser'),
     dryRun: boolean('dry_run').notNull().default(false),
     status: text('status').notNull().default('started'),
+    /** Plateforme détectée, mode retenu (auto, prefill, manual) et motif d'arrêt éventuel. */
+    platform: text('platform').notNull().default(''),
+    mode: text('mode').notNull().default(''),
+    reason: text('reason').notNull().default(''),
+    /** Taux de remplissage, champs manquants, interventions. */
+    stats: jsonb('stats').$type<Json>(),
+    url: text('url').notNull().default(''),
+    trigger: text('trigger').notNull().default(''),
     steps: jsonb('steps').$type<unknown[]>().notNull().default([]),
     fields: jsonb('fields').$type<unknown[]>().notNull().default([]),
     error: text('error').notNull().default(''),

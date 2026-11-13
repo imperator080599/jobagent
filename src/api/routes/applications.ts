@@ -48,7 +48,7 @@ export function applicationsRoutes(deps: AppDeps) {
   r.get('/:jobId', async (c) => c.json(await buildPack(c.get('uctx'), c.req.param('jobId'))));
 
   r.post('/:jobId/approve', sessionOnly, async (c) => {
-    const input = await body(c, z.object({ withoutLetter: z.boolean().optional() }));
+    const input = await body(c, z.object({ withoutLetter: z.boolean().optional(), send: z.boolean().optional() }));
     return c.json(await approveApplication(c.get('uctx'), c.req.param('jobId'), input));
   });
 

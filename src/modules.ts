@@ -9,6 +9,7 @@ import { linkedinRoutes } from './api/routes/linkedin.js';
 import { documentsRoutes } from './api/routes/documents.js';
 import { jobsRoutes } from './api/routes/jobs.js';
 import { applicationsRoutes } from './api/routes/applications.js';
+import { applyRoutes } from './api/routes/apply.js';
 import { searchRoutes } from './api/routes/search.js';
 import { mailRoutes } from './api/routes/mail.js';
 import { cronRoutes } from './api/routes/cron.js';
@@ -18,6 +19,7 @@ import './pipeline/index.js';
 import './search/index.js';
 import './tracker/index.js';
 import './notify/index.js';
+import './apply/index.js';
 
 registerRoutes('public', (app, deps) => app.route('/cron', cronRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/overview', overviewRoutes(deps)));
@@ -29,5 +31,6 @@ registerRoutes('private', (app, deps) => app.route('/profile/linkedin', linkedin
 registerRoutes('private', (app, deps) => app.route('/documents', documentsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/jobs', jobsRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/applications', applicationsRoutes(deps)));
+registerRoutes('private', (app, deps) => app.route('/apply', applyRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/search', searchRoutes(deps)));
 registerRoutes('private', (app, deps) => app.route('/mail', mailRoutes(deps)));

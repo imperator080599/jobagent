@@ -10,6 +10,7 @@ import type { UserContext } from '../core/context.js';
 import { logActivity } from '../core/activity.js';
 import { badRequest, conflict } from '../core/errors.js';
 import { raiseAction, resolveActionsFor } from '../core/inbox.js';
+import { enqueue } from '../core/queue.js';
 import { getSetting } from '../core/settings.js';
 import { newId } from '../db/ids.js';
 import { applications, cvVersions, letters } from '../db/schema.js';
@@ -88,7 +89,7 @@ export async function buildPack(ctx: UserContext, jobId: string): Promise<Applic
 }
 
 /** L'utilisateur valide les documents : ils deviennent définitifs pour cette candidature. */
-export async function approveApplication(ctx: UserContext, jobId: string, opts: { withoutLetter?: boolean } = {}): Promise<ApplicationPack> {
+export async function approveApplication(ctx: UserContext, jobId: string, opts: { withoutLetter?: boolean; send?: boolean; actor?: 'user' | 'autopilot' } = {}): Promise<ApplicationPack> {
   const pack = await buildPack(ctx, jobId);
   const { job, cv, letter } = pack;
   if (!['ready_to_apply', 'letter_in_progress'].includes(job.stage)) throw conflict("Cette candidature n'est pas prête à être validée.");
@@ -98,13 +99,17 @@ export async function approveApplication(ctx: UserContext, jobId: string, opts: 
   const now = ctx.now();
   await ctx.db.update(cvVersions).set({ status: 'approved', approvedAt: now }).where(eq(cvVersions.id, cv.id));
   if (letter && !opts.withoutLetter) await ctx.db.update(letters).set({ status: 'approved', approvedAt: now }).where(eq(letters.id, letter.id));
-  const values = { cvVersionId: cv.id, letterId: opts.withoutLetter ? null : (letter?.id ?? null), mode: 'manual' as const, applyUrl: job.applyUrl || job.canonicalUrl, qaReport: pack.qa as unknown as Record<string, unknown>, preparedAt: now, authorizedAt: now, authorizedBy: 'user', updatedAt: now };
+  // « send » : l'utilisateur autorise l'envoi automatique de CETTE candidature (si la plateforme le permet).
+  const actor = opts.actor ?? 'user';
+  const values = { cvVersionId: cv.id, letterId: opts.withoutLetter ? null : (letter?.id ?? null), mode: opts.send ? ('auto' as const) : ('assisted' as const), applyUrl: job.applyUrl || job.canonicalUrl, qaReport: pack.qa as unknown as Record<string, unknown>, preparedAt: now, authorizedAt: now, authorizedBy: actor, updatedAt: now };
   await ctx.db
     .insert(applications)
     .values({ id: newId('app'), userId: ctx.userId, jobId, ...values })
     .onConflictDoUpdate({ target: [applications.userId, applications.jobId], set: values });
   if (job.stage !== 'ready_to_apply') await setStage(ctx, jobId, 'ready_to_apply', { actor: 'user', reason: 'documents validés', soft: true });
   await resolveActionsFor(ctx.db, ctx.userId, { jobId, types: ['application.validate'] }, { approved: true });
+  // Le moteur de candidature prend le relais : envoi, remplissage ou préparation selon la plateforme et vos règles.
+  await enqueue(ctx.db, { type: 'application.run', userId: ctx.userId, payload: { jobId, trigger: actor === 'autopilot' ? 'autopilot' : 'approval' }, idempotencyKey: `application.run:${jobId}`, priority: 86, runAfter: ctx.now() });
   await raiseAction(ctx.db, {
     userId: ctx.userId,
     type: 'application.submit',
@@ -115,7 +120,7 @@ export async function approveApplication(ctx: UserContext, jobId: string, opts: 
     reopen: true,
     body: { applyUrl: values.applyUrl, cvPdfFileId: cv.pdfFileId, cvDocxFileId: cv.docxFileId, letterPdfFileId: opts.withoutLetter ? null : (letter?.pdfFileId ?? null), letterDocxFileId: opts.withoutLetter ? null : (letter?.docxFileId ?? null), deadlineAt: job.deadlineAt },
   });
-  await logActivity(ctx.db, { userId: ctx.userId, actor: 'user', action: 'application.approved', summary: `${job.companyName} — ${job.title} : documents validés`, entityType: 'job', entityId: jobId, data: { cvVersionId: cv.id, letterId: values.letterId } });
+  await logActivity(ctx.db, { userId: ctx.userId, actor: actor === 'autopilot' ? 'agent:apply' : 'user', action: 'application.approved', summary: `${job.companyName} — ${job.title} : documents validés${actor === 'autopilot' ? ' par vos règles AUTOPILOT' : ''}${opts.send ? ', envoi automatique autorisé' : ''}`, entityType: 'job', entityId: jobId, data: { cvVersionId: cv.id, letterId: values.letterId, send: Boolean(opts.send) } });
   return buildPack(ctx, jobId);
 }
 
