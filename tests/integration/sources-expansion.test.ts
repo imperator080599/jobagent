@@ -48,8 +48,10 @@ const personioXml = `<?xml version="1.0" encoding="UTF-8"?>
 </position>
 </workzag-jobs>`;
 
+let offline = false;
 const net: FetchMock = (url, init) => {
   const u = new URL(url);
+  if (offline) throw new Error('getaddrinfo ENOTFOUND');
   requests.push({ url, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
   if (u.host === 'kestrel.jobs.personio.de' && u.pathname === '/xml') return new Response(personioXml, { status: 200, headers: { 'content-type': 'text/xml' } });
@@ -167,6 +169,18 @@ describe('annuaire des employeurs et découverte', () => {
     const l = await discoverCompany(uctx(), laz!.id);
     expect(l.discovery).toBe('not_found');
     expect(l.discoveryNote).toContain('Indiquez l');
+  });
+
+  it('panne réseau : rien n’est conclu, l’entreprise sera revérifiée', async () => {
+    offline = true;
+    try {
+      const [co] = await t.ctx.db.select().from(companies).where(and(eq(companies.userId, userId), eq(companies.name, 'Ardian')));
+      const r = await discoverCompany(uctx(), co!.id);
+      expect(r.discovery).toBe('unknown');
+      expect(r.discoveryNote).toContain('nouvel essai');
+    } finally {
+      offline = false;
+    }
   });
 
   it('sens descendant : une offre sur un ATS fait suivre tout le site carrières de son entreprise', async () => {

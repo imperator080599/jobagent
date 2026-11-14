@@ -107,10 +107,15 @@ async function probe(ctx: UserContext, type: string, slug: string, name: string)
         return null;
     }
   } catch (err) {
-    if (err instanceof FetchError) return null;
+    // Identifiant inconnu de la plateforme : simplement absent. Autre incident (réseau, serveur,
+    // limitation de débit) : la vérification n'a pas eu lieu, elle sera refaite.
+    if (err instanceof FetchError && (err.status === 404 || err.status === 410 || err.status === 400)) return null;
+    if (err instanceof FetchError) throw new ProbeUnavailable(`${type} : ${err.message}`);
     throw err;
   }
 }
+
+class ProbeUnavailable extends Error {}
 
 const PROBE_TYPES = ['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'personio', 'breezy', 'recruitee'];
 
@@ -165,40 +170,67 @@ export async function ensureBoardSource(ctx: UserContext, company: Company, hit:
   return row.id;
 }
 
+/** Interroge les ATS avec les identifiants plausibles : site vérifié, sites à confirmer, ou rien. */
+async function probeAll(ctx: UserContext, co: Company, tried: string[]): Promise<{ verified: BoardHit | null; ambiguous: BoardHit[] }> {
+  const ambiguous: BoardHit[] = [];
+  let unavailable = 0;
+  let last: ProbeUnavailable | null = null;
+  for (const slug of slugCandidates(co.name).slice(0, 3)) {
+    for (const type of PROBE_TYPES) {
+      tried.push(`${type}:${slug}`);
+      let h: BoardHit | null = null;
+      try {
+        h = await probe(ctx, type, slug, co.name);
+      } catch (err) {
+        if (!(err instanceof ProbeUnavailable)) throw err;
+        unavailable++;
+        last = err;
+        continue;
+      }
+      if (!h) continue;
+      if (h.verified) return { verified: h, ambiguous };
+      ambiguous.push(h);
+    }
+  }
+  // Aucune plateforme n'a répondu : panne réseau probable, rien n'est conclu.
+  if (unavailable === tried.length && last) throw last;
+  return { verified: null, ambiguous };
+}
+
 /** Cherche, vérifie et met sous surveillance le site carrières d'une entreprise. */
 export async function discoverCompany(ctx: UserContext, companyId: string): Promise<Company> {
   const [co] = await ctx.db.select().from(companies).where(and(eq(companies.id, companyId), eq(companies.userId, ctx.userId)));
   if (!co) throw new Error('Entreprise introuvable.');
-  let hit: BoardHit | null = co.careersUrl ? (detectConnector(co.careersUrl)?.connector.mode === 'board' ? { ...(() => { const d = detectConnector(co.careersUrl)!; return { type: d.connector.type, config: d.config }; })(), declaredName: null, jobs: null, verified: true, via: 'adresse indiquée' } : await fromCareersPage(ctx, co.careersUrl)) : null;
+  const save = async (patch: Partial<typeof companies.$inferInsert>) => (await ctx.db.update(companies).set({ ...patch, lastCheckedAt: ctx.now() }).where(eq(companies.id, co.id)).returning())[0]!;
+  // 1. Adresse indiquée : site reconnu directement, ou lien vers un ATS trouvé sur la page.
+  let hit: BoardHit | null = null;
+  if (co.careersUrl) {
+    const direct = detectConnector(co.careersUrl);
+    hit = direct?.connector.mode === 'board' ? { type: direct.connector.type, config: direct.config, declaredName: null, jobs: null, verified: true, via: 'adresse indiquée' } : await fromCareersPage(ctx, co.careersUrl);
+  }
+  // 2. API publiques des ATS, avec les identifiants plausibles de l'entreprise.
   const tried: string[] = [];
+  let ambiguous: BoardHit[] = [];
   if (!hit) {
-    const ambiguous: BoardHit[] = [];
-    outer: for (const slug of slugCandidates(co.name).slice(0, 3)) {
-      for (const type of PROBE_TYPES) {
-        tried.push(`${type}:${slug}`);
-        const h = await probe(ctx, type, slug, co.name);
-        if (!h) continue;
-        if (h.verified) {
-          hit = h;
-          break outer;
-        }
-        ambiguous.push(h);
-      }
-    }
-    if (!hit && ambiguous.length) {
-      const a = ambiguous[0]!;
-      const note = `Site ${getConnector(a.type)?.label} « ${JSON.stringify(a.config)} » trouvé (${a.via}), mais l'entreprise qu'il déclare n'a pas pu être vérifiée${a.declaredName ? ` (« ${a.declaredName} »)` : ''} : à confirmer.`;
-      const [row] = await ctx.db.update(companies).set({ discovery: 'ambiguous', discoveryNote: note, ats: a.type, atsConfig: a.config, lastCheckedAt: ctx.now() }).where(eq(companies.id, co.id)).returning();
-      return row!;
+    try {
+      const r = await probeAll(ctx, co, tried);
+      hit = r.verified;
+      ambiguous = r.ambiguous;
+    } catch (err) {
+      if (!(err instanceof ProbeUnavailable)) throw err;
+      // Rien n'a pu être vérifié : l'entreprise n'est pas déclarée introuvable ; la recherche sera refaite.
+      return save({ discovery: 'unknown', discoveryNote: `Vérification impossible pour l'instant (${err.message}) : nouvel essai automatique.` });
     }
   }
+  if (!hit && ambiguous.length) {
+    const a = ambiguous[0]!;
+    return save({ discovery: 'ambiguous', discoveryNote: `Site ${getConnector(a.type)?.label} « ${JSON.stringify(a.config)} » trouvé (${a.via}), mais l'entreprise qu'il déclare n'a pas pu être vérifiée${a.declaredName ? ` (« ${a.declaredName} »)` : ''} : à confirmer.`, ats: a.type, atsConfig: a.config });
+  }
   if (!hit) {
-    const [row] = await ctx.db.update(companies).set({ discovery: 'not_found', discoveryNote: co.careersUrl ? "Aucun ATS reconnu sur la page carrières indiquée : elle sera relue comme page publique si vous l'ajoutez en flux." : `Aucun site carrières trouvé automatiquement (${tried.length} vérifications). Indiquez l'adresse de sa page carrières pour la suivre.`, lastCheckedAt: ctx.now() }).where(eq(companies.id, co.id)).returning();
-    return row!;
+    return save({ discovery: 'not_found', discoveryNote: co.careersUrl ? "Aucun ATS reconnu sur la page carrières indiquée : ajoutez-la comme flux si elle en publie un." : `Aucun site carrières trouvé automatiquement (${tried.length} vérifications). Indiquez l'adresse de sa page carrières pour la suivre.` });
   }
   const sourceId = await ensureBoardSource(ctx, co, hit);
-  const [row] = await ctx.db.update(companies).set({ discovery: 'found', discoveryNote: `Trouvé via ${hit.via}${hit.jobs != null ? `, ${hit.jobs} offre(s) publiée(s)` : ''}.`, ats: hit.type, atsConfig: hit.config, boardSourceId: sourceId, lastCheckedAt: ctx.now() }).where(eq(companies.id, co.id)).returning();
-  return row!;
+  return save({ discovery: 'found', discoveryNote: `Trouvé via ${hit.via}${hit.jobs != null ? `, ${hit.jobs} offre(s) publiée(s)` : ''}.`, ats: hit.type, atsConfig: hit.config, boardSourceId: sourceId });
 }
 
 /** Ajoute à l'annuaire les employeurs de départ (sans doublon). */
