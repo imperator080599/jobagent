@@ -1,9 +1,10 @@
 // Registre des connecteurs disponibles.
 import { ashby, greenhouse, lever, smartrecruiters } from './ats.js';
+import { breezy, personio, recruitee, workable, workday } from './ats2.js';
 import { adzuna, feed, francetravail } from './engines.js';
 import type { Connector } from './types.js';
 
-export const CONNECTORS: Connector[] = [greenhouse, lever, ashby, smartrecruiters, francetravail, adzuna, feed];
+export const CONNECTORS: Connector[] = [greenhouse, lever, ashby, smartrecruiters, workday, workable, recruitee, personio, breezy, francetravail, adzuna, feed];
 const BY_TYPE = new Map(CONNECTORS.map((c) => [c.type, c]));
 
 export function getConnector(type: string): Connector | null {

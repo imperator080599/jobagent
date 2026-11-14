@@ -134,6 +134,12 @@ export function searchRoutes(deps: AppDeps) {
     return c.json({ runs: rows });
   });
 
+  /** Matrice de couverture : statut réel de chaque source, méthode d'accès, limites et preuves. */
+  r.get('/coverage-matrix', async (c) => {
+    const { coverageMatrix } = await import('../../search/coverage.js');
+    return c.json(await coverageMatrix(c.get('uctx')));
+  });
+
   // ── Entreprises ciblées ──
   r.get('/companies', async (c) => c.json({ companies: await ctx.db.select().from(companies).where(eq(companies.userId, c.get('user').id)).orderBy(companies.name) }));
   const CompanyInput = z.object({ name: z.string().trim().min(1).max(160), tier: z.enum(['dream', 'target', 'watch', 'excluded']).default('target'), careersUrl: z.string().trim().max(2000).default(''), notes: z.string().max(4000).default('') });
@@ -160,6 +166,20 @@ export function searchRoutes(deps: AppDeps) {
       }
     }
     return c.json({ company: row, source, detected: hit ? hit.connector.label : null });
+  });
+  /** Lance la recherche (ou la revérification) du site carrières d'une entreprise. */
+  r.post('/companies/:id/discover', sessionOnly, async (c) => {
+    const userId = c.get('user').id;
+    const [co] = await ctx.db.select({ id: companies.id }).from(companies).where(and(eq(companies.id, c.req.param('id')), eq(companies.userId, userId)));
+    if (!co) throw notFound();
+    await enqueue(ctx.db, { type: 'company.discover', userId, payload: { companyId: co.id }, idempotencyKey: `company.discover:${co.id}`, priority: 70, runAfter: ctx.now(), maxAttempts: 2 });
+    deps.kick(c);
+    return c.json({ queued: true });
+  });
+  /** Ajoute les employeurs de départ (conseil en transactions, banques d'affaires, fonds…). */
+  r.post('/companies/seed', sessionOnly, async (c) => {
+    const { seedTargetCompanies } = await import('../../search/companies.js');
+    return c.json({ added: await seedTargetCompanies(c.get('uctx')) });
   });
   r.delete('/companies/:id', sessionOnly, async (c) => {
     await ctx.db.delete(companies).where(and(eq(companies.id, c.req.param('id')), eq(companies.userId, c.get('user').id)));

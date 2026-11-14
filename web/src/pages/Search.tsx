@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'wouter';
 import { CONTRACTS, CONTRACT_LABELS, SENIORITIES, SENIORITY_LABELS, type SearchCriteria } from '../../../src/shared/search';
 import { Alert, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Input, Loading, Modal, PageHeader, Select, Switch, Tabs, TagInput, type Tone, useToast } from '../components/ui';
+import { CoverageTab } from './search/Coverage';
 import { del, get, patch, post, put } from '../lib/api';
 import { cx, formatDate, relativeTime } from '../lib/format';
 import { errorText } from '../lib/hooks';
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'criteres', label: 'Critères' },
   { id: 'sources', label: 'Sources' },
   { id: 'entreprises', label: 'Entreprises' },
+  { id: 'couverture', label: 'Couverture' },
   { id: 'historique', label: 'Historique' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -387,7 +389,16 @@ const TIER_TONES: Record<keyof typeof TIERS, Tone> = { dream: 'brand', target: '
 function CompaniesTab() {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['search', 'companies'], queryFn: () => get<{ companies: { id: string; name: string; tier: keyof typeof TIERS; careersUrl: string }[] }>('/search/companies') });
+  const q = useQuery({ queryKey: ['search', 'companies'], queryFn: () => get<{ companies: { id: string; name: string; tier: keyof typeof TIERS; careersUrl: string; ats: string; discovery: 'unknown' | 'found' | 'not_found' | 'ambiguous'; discoveryNote: string; origin: string; jobsSeen: number; tags: string[]; lastCheckedAt: string | null }[] }>('/search/companies'), refetchInterval: 30_000 });
+  const discover = useMutation({ mutationFn: (id: string) => post(`/search/companies/${id}/discover`, {}), onSuccess: () => toast('Recherche du site carrières lancée.', 'success'), onError: (e) => toast(errorText(e), 'danger') });
+  const seed = useMutation({
+    mutationFn: () => post<{ added: number }>('/search/companies/seed', {}),
+    onSuccess: (d) => {
+      toast(`${d.added} employeur(s) ajouté(s) ; leurs sites carrières vont être recherchés et vérifiés.`, 'success');
+      void qc.invalidateQueries({ queryKey: ['search'] });
+    },
+    onError: (e) => toast(errorText(e), 'danger'),
+  });
   const [name, setName] = useState('');
   const [tier, setTier] = useState<keyof typeof TIERS>('target');
   const [url, setUrl] = useState('');
@@ -407,7 +418,16 @@ function CompaniesTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader icon={<Building2 className="size-4" />} title="Entreprises que vous visez" description="Les offres d'une entreprise prioritaire ou ciblée remontent dans le classement et ne sont jamais masquées par le seuil de pertinence. Une entreprise exclue n'est jamais proposée." />
+        <CardHeader
+          icon={<Building2 className="size-4" />}
+          title="Entreprises que vous visez"
+          description="Les offres d'une entreprise prioritaire ou ciblée remontent dans le classement et ne sont jamais masquées par le seuil de pertinence. Leur site carrières est recherché, vérifié puis suivi automatiquement ; une entreprise découverte par une offre rejoint l'annuaire « à surveiller »."
+          action={
+            <Button size="sm" loading={seed.isPending} onClick={() => seed.mutate()}>
+              Ajouter les employeurs de départ
+            </Button>
+          }
+        />
         <div className="grid gap-3 px-5 pb-5 sm:grid-cols-[1.2fr_0.8fr_1.6fr_auto] sm:items-end">
           <Field label="Entreprise"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom" /></Field>
           <Field label="Statut">
@@ -424,8 +444,22 @@ function CompaniesTab() {
           <ul className="divide-y divide-slate-100">
             {list.map((co) => (
               <li key={co.id} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{co.name}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900">
+                    {co.name} {co.tags.length > 0 && <span className="text-xs font-normal text-slate-400">· {co.tags.join(', ')}</span>}
+                  </p>
+                  <p className="truncate text-xs text-slate-500" title={co.discoveryNote}>
+                    {co.discovery === 'found' ? `Site carrières suivi (${co.ats}).` : co.discovery === 'ambiguous' ? 'Site trouvé, à confirmer.' : co.discovery === 'not_found' ? 'Site carrières introuvable automatiquement : indiquez son adresse.' : 'Recherche du site carrières à venir.'}
+                    {co.jobsSeen > 0 && ` · ${co.jobsSeen} offre(s) vue(s)`}
+                    {co.lastCheckedAt && ` · vérifié ${formatDate(co.lastCheckedAt)}`}
+                  </p>
+                </div>
                 <Badge tone={TIER_TONES[co.tier]}>{TIERS[co.tier]}</Badge>
+                {co.discovery !== 'found' && co.tier !== 'excluded' && (
+                  <Button size="sm" variant="ghost" loading={discover.isPending && discover.variables === co.id} onClick={() => discover.mutate(co.id)}>
+                    Chercher
+                  </Button>
+                )}
                 <IconButton label="Retirer" onClick={() => remove.mutate(co.id)}><Trash2 className="size-4" /></IconButton>
               </li>
             ))}
@@ -479,6 +513,7 @@ export function SearchPage() {
       {tab === 'criteres' && <CriteriaTab />}
       {tab === 'sources' && <SourcesTab />}
       {tab === 'entreprises' && <CompaniesTab />}
+      {tab === 'couverture' && <CoverageTab />}
       {tab === 'historique' && <HistoryTab />}
     </>
   );

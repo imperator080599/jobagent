@@ -72,6 +72,11 @@ export const SETTINGS = {
       consents: { privacyPolicy: false, accuracyAttestation: false, declineDemographics: true },
     },
   },
+  /** Annuaire des employeurs : liste de départ et découverte automatique des sites carrières. */
+  'search.companies': {
+    schema: z.object({ seeded: z.boolean(), autoDiscover: z.boolean(), perRun: z.number().int().min(0).max(50) }),
+    default: { seeded: false, autoDiscover: true, perRun: 8 },
+  },
   'ats.thresholds': {
     schema: z.object({ excellent: z.number(), interesting: z.number(), limited: z.number() }),
     default: { excellent: 15, interesting: 13, limited: 11 },

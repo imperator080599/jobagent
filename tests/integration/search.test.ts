@@ -301,7 +301,7 @@ describe('planification et API', () => {
     const company = await api.post('/api/search/companies', { name: 'Valmont Advisory', tier: 'dream', careersUrl: 'https://jobs.ashbyhq.com/valmont' });
     expect(company.data).toMatchObject({ detected: 'Ashby', source: { type: 'ashby', name: 'Valmont Advisory' } });
     const connectors = await api.get('/api/search/connectors');
-    expect(connectors.data.connectors.map((k: any) => k.type)).toEqual(['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'francetravail', 'adzuna', 'feed']);
+    expect(connectors.data.connectors.map((k: any) => k.type)).toEqual(['greenhouse', 'lever', 'ashby', 'smartrecruiters', 'workday', 'workable', 'recruitee', 'personio', 'breezy', 'francetravail', 'adzuna', 'feed']);
     // Les secrets ne sont jamais renvoyés : seulement leur présence.
     expect(JSON.stringify(connectors.data)).not.toContain('bon-secret');
     expect(connectors.data.connectors.find((k: any) => k.type === 'francetravail').secrets[0].configured).toBe(true);

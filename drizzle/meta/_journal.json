@@ -29,6 +29,13 @@
       "when": 1794605463767,
       "tag": "0003_application_automation",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794617105239,
+      "tag": "0004_company_discovery",
+      "breakpoints": true
     }
   ]
 }

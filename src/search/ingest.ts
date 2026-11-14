@@ -374,6 +374,13 @@ export async function ingestJob(ctx: UserContext, raw: RawJob, o: IngestOptions)
   await recordSighting(ctx, job, n, raw, o);
   await ctx.db.insert(stageHistory).values({ id: newId('stg'), userId: ctx.userId, jobId: job.id, fromStage: '', toStage: 'new', actor: o.actor ?? 'system', reason: `Source : ${o.source.name}`, at: now });
   await logActivity(ctx.db, { userId: ctx.userId, actor: o.actor ?? 'system', action: 'job.created', summary: `${job.companyName} — ${job.title}`, entityType: 'job', entityId: job.id, data: { source: o.source.type } });
+  // Sens descendant : l'entreprise rejoint l'annuaire ; son site carrières complet est suivi s'il est sur un ATS connu.
+  try {
+    const { noteCompanyFromJob } = await import('./companies.js');
+    await noteCompanyFromJob(ctx, job, { relevant: true });
+  } catch (err) {
+    ctx.log.warn('company_note_failed', { error: String(err) });
+  }
   return { job, outcome: 'created', match: null, verdict: found, contentChanged: false };
 }
 

@@ -6,13 +6,15 @@
 import { normalize, tokens } from '../core/text.js';
 
 export const BUILTIN_SYNONYMS: string[][] = [
-  ['transaction services', 'financial due diligence', 'due diligence financière', 'deal advisory', 'transaction advisory services', 'transaction advisory', 'FDD', 'M&A transaction services', 'conseil en transactions'],
-  ['M&A', 'fusions-acquisitions', 'fusions acquisitions', 'mergers and acquisitions', 'corporate finance', 'M&A advisory', 'corporate development', 'corp dev'],
+  // Français, anglais, espagnol, allemand : un même métier, plusieurs intitulés.
+  ['transaction services', 'financial due diligence', 'due diligence financière', 'deal advisory', 'transaction advisory services', 'transaction advisory', 'FDD', 'M&A transaction services', 'conseil en transactions', 'servicios de transacciones', 'due diligence financiera', 'asesoramiento en transacciones', 'Transaktionsberatung', 'Financial Due Diligence Berater'],
+  ['M&A', 'fusions-acquisitions', 'fusions acquisitions', 'mergers and acquisitions', 'corporate finance', 'M&A advisory', 'corporate development', 'corp dev', 'fusiones y adquisiciones', 'finanzas corporativas', 'M&A-Beratung', 'Unternehmensfinanzierung'],
+  ['financial advisory', 'conseil financier', 'advisory financier', 'asesoramiento financiero', 'Finanzberatung', 'financial advisory services'],
   ['audit financier', 'auditeur financier', 'financial audit', 'external audit', 'statutory audit', 'commissariat aux comptes', 'audit légal', 'assurance'],
   ['contrôle de gestion', 'contrôleur de gestion', 'FP&A', 'financial planning and analysis', 'business controller', 'financial controller', 'controlling', 'business analyst finance'],
   ['analyste financier', 'financial analyst', 'analyste finance', 'finance analyst'],
-  ['évaluation', 'valuation', 'valuation and modelling', 'business valuation', 'évaluation financière', 'modélisation financière', 'financial modelling'],
-  ['private equity', 'capital-investissement', 'capital investissement', 'investment analyst', "chargé d'investissement", 'investment associate'],
+  ['évaluation', 'valuation', 'valuation and modelling', 'business valuation', 'évaluation financière', 'modélisation financière', 'financial modelling', 'valoración', 'valoración de empresas', 'Unternehmensbewertung'],
+  ['private equity', 'capital-investissement', 'capital investissement', 'investment analyst', "chargé d'investissement", 'investment associate', 'capital privado', 'capital riesgo', 'Beteiligungsmanager'],
   ['restructuring', 'restructuration', 'turnaround', 'prévention des difficultés'],
   ['audit interne', 'internal audit', 'contrôle interne', 'internal control'],
   ['consolidation', 'consolidation et reporting', 'group reporting', 'consolideur'],
@@ -20,7 +22,7 @@ export const BUILTIN_SYNONYMS: string[][] = [
   ['comptabilité', 'accounting', 'comptable', 'accountant', 'general ledger'],
   ['risk management', 'gestion des risques', 'risk analyst', 'analyste risques'],
   ['strategy consulting', 'conseil en stratégie', 'consultant en stratégie', 'strategy consultant'],
-  ['investment banking', "banque d'affaires", "banque d'investissement", 'IBD'],
+  ['investment banking', "banque d'affaires", "banque d'investissement", 'IBD', 'banca de inversión', 'Investmentbanking'],
 ];
 
 const key = (s: string) => normalize(s).replace(/[^a-z0-9& ]/g, ' ').replace(/\s+/g, ' ').trim();

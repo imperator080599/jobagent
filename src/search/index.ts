@@ -34,3 +34,34 @@ registerRecurringJob({
     await pruneRuns(uctx);
   },
 });
+
+// ── Annuaire des employeurs : liste de départ, découverte et vérification des sites carrières ──
+registerTaskHandler('company.discover', async (ctx, task) => {
+  const p = (task.payload ?? {}) as { companyId?: string };
+  if (!p.companyId) return { skipped: 'no_company' };
+  const { discoverCompany } = await import('./companies.js');
+  const co = await discoverCompany(ctx, p.companyId);
+  return { discovery: co.discovery, ats: co.ats };
+});
+
+registerRecurringJob({
+  name: 'search.companies',
+  async isDue(ctx, userId, lastRunAt, now) {
+    const s = await getSetting(ctx.db, userId, 'search.companies');
+    if (!s.autoDiscover) return false;
+    return !lastRunAt || now.getTime() - lastRunAt.getTime() >= 6 * 3600_000;
+  },
+  async run(ctx, userId, now) {
+    const uctx = forUser(ctx, userId);
+    const { companiesToDiscover, seedTargetCompanies } = await import('./companies.js');
+    const s = await getSetting(ctx.db, userId, 'search.companies');
+    if (!s.seeded) {
+      await seedTargetCompanies(uctx);
+      const { setSetting } = await import('../core/settings.js');
+      await setSetting(ctx.db, userId, 'search.companies', { ...s, seeded: true }, 'system');
+    }
+    for (const co of await companiesToDiscover(uctx, s.perRun)) {
+      await enqueue(ctx.db, { type: 'company.discover', userId, payload: { companyId: co.id }, idempotencyKey: `company.discover:${co.id}`, priority: 20, runAfter: now, maxAttempts: 2 });
+    }
+  },
+});

@@ -28,7 +28,7 @@ import { setStage } from './stage.js';
 export type MailCategory = 'confirmation' | 'interview' | 'rejection' | 'offer' | 'recruiter_request' | 'job_alert' | 'other';
 export const MAIL_LABELS: Record<MailCategory, string> = { confirmation: 'Accusé de réception', interview: "Proposition d'entretien", rejection: 'Refus', offer: "Proposition d'embauche", recruiter_request: 'Demande du recruteur', job_alert: "Alerte d'offres", other: 'Autre' };
 
-const ALERT_SENDERS = /(jobalerts?-noreply@linkedin\.com|jobs-listings@linkedin\.com|jobs-noreply@linkedin\.com|alert@indeed\.com|no-?reply@indeed\.com|@jobalert\.indeed\.com|alerts?@welcometothejungle\.com|@apec\.fr|@cadremploi\.fr|@hellowork\.com|@jobteaser\.com|@efinancialcareers\.|@glassdoor\.com|civiweb|businessfrance)/i;
+const ALERT_SENDERS = /(jobalerts?-noreply@linkedin\.com|jobs-listings@linkedin\.com|jobs-noreply@linkedin\.com|alert@indeed\.com|no-?reply@indeed\.com|@jobalert\.indeed\.com|alerts?@welcometothejungle\.com|@apec\.fr|@cadremploi\.fr|@hellowork\.com|@jobteaser\.com|@efinancialcareers\.|@glassdoor\.com|civiweb|businessfrance|@monster\.|@francetravail\.fr|@pole-emploi\.fr)/i;
 const ATS_SENDERS = /(greenhouse(-mail)?\.io|lever\.co|hire\.lever|smartrecruiters\.com|myworkday(jobs)?\.com|workday\.com|successfactors|taleo\.net|icims\.com|ashbyhq\.com|teamtailor(-mail)?\.com|recruitee\.com|workable(mail)?\.com|personio\.|jobvite\.com|bamboohr\.com|talentsoft|cornerstone|avature\.net|welcomekit|flatchr|beetween|digitalrecruiters|softy\.pro)/i;
 const JOB_WORDS = /(candidature|application|applying|applied|entretien|interview|recrutement|recruit|recruiter|recruteur|talent acquisition|hiring|poste de|position of|job offer|offre d'emploi|votre profil|your profile|bewerbung)/i;
 
@@ -180,7 +180,7 @@ export interface AlertJob {
   url: string;
 }
 
-const JOB_LINK = /(linkedin\.com\/(comm\/)?jobs\/view\/|indeed\.[a-z.]+\/(rc\/clk|viewjob|pagead\/clk)|welcometothejungle\.com\/[^"]*\/jobs\/|apec\.fr\/[^"]*offre|cadremploi\.fr\/[^"]*offre|hellowork\.com\/[^"]*emplois?\/|jobteaser\.com\/[^"]*job-offers\/|efinancialcareers\.[^"]*\/jobs?-|glassdoor\.[^"]*job-listing)/i;
+const JOB_LINK = /(linkedin\.com\/(comm\/)?jobs\/view\/|indeed\.[a-z.]+\/(rc\/clk|viewjob|pagead\/clk)|welcometothejungle\.com\/[^"]*\/jobs\/|apec\.fr\/[^"]*offre|cadremploi\.fr\/[^"]*offre|hellowork\.com\/[^"]*emplois?\/|jobteaser\.com\/[^"]*job-offers\/|efinancialcareers\.[^"]*\/jobs?-|glassdoor\.[^"]*job-listing|mon-vie-via\.businessfrance\.fr\/[^"]*offres?\/|civiweb\.com\/[^"]*offre|monster\.[a-z.]+\/[^"]*(emploi|job-openings|offre)|francetravail\.fr\/[^"]*offres?\/recherche\/detail)/i;
 const GENERIC = /^(voir|view|see|apply|postuler|en savoir plus|learn more|afficher|consulter|découvrir)\b/i;
 
 /** Offres citées dans un email d'alerte : lien, intitulé, entreprise, lieu. Une entrée sans entreprise lisible est ignorée (rien n'est deviné). */

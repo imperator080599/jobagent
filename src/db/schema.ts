@@ -427,6 +427,18 @@ export const companies = pgTable(
     tier: text('tier').$type<'dream' | 'target' | 'watch' | 'excluded'>().notNull().default('target'),
     tags: jsonb('tags').$type<string[]>().notNull().default([]),
     notes: text('notes').notNull().default(''),
+    /** Site carrières détecté et vérifié : plateforme, configuration de lecture, source suivie. */
+    ats: text('ats').notNull().default(''),
+    atsConfig: jsonb('ats_config').$type<Json>(),
+    boardSourceId: text('board_source_id'),
+    /** unknown = jamais cherché ; found = site vérifié ; not_found = introuvable automatiquement ; ambiguous = à confirmer. */
+    discovery: text('discovery').$type<'unknown' | 'found' | 'not_found' | 'ambiguous'>().notNull().default('unknown'),
+    discoveryNote: text('discovery_note').notNull().default(''),
+    /** seed = liste de départ ; job = découverte via une offre ; user = ajoutée par vous. */
+    origin: text('origin').$type<'seed' | 'job' | 'user'>().notNull().default('user'),
+    countries: jsonb('countries').$type<string[]>().notNull().default([]),
+    jobsSeen: integer('jobs_seen').notNull().default(0),
+    lastCheckedAt: ts('last_checked_at'),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('companies_name_uq').on(t.userId, t.nameNorm)],
