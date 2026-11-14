@@ -247,12 +247,19 @@ export async function runAutomation(ctx: UserContext, jobId: string, opts: { bro
       // Inscription de l'envoi avant le clic : verrou contre tout second envoi, même après une panne.
       const [fresh] = await ctx.db.select({ submittedAt: applications.submittedAt }).from(applications).where(eq(applications.id, app.id));
       if (fresh?.submittedAt) return false;
-      const locked = await ctx.db
-        .update(applicationAttempts)
-        .set({ status: 'submitting' })
-        .where(and(eq(applicationAttempts.id, attempt!.id), eq(applicationAttempts.status, 'running'), sql`not exists (select 1 from application_attempts a where a.application_id = ${app.id} and a.status in ('submitting', 'submitted') and a.id <> ${attempt!.id})`))
-        .returning();
-      return locked.length === 1;
+      // L'index unique partiel garantit qu'une seule tentative peut passer à « en cours d'envoi » :
+      // une exécution concurrente échoue ici et n'envoie rien.
+      try {
+        const locked = await ctx.db
+          .update(applicationAttempts)
+          .set({ status: 'submitting' })
+          .where(and(eq(applicationAttempts.id, attempt!.id), eq(applicationAttempts.status, 'running')))
+          .returning();
+        return locked.length === 1;
+      } catch (err) {
+        if (/attempts_one_submission_uq|duplicate key|unique/i.test(String((err as Error).message) + String((err as { cause?: unknown }).cause ?? ''))) return false;
+        throw err;
+      }
     },
     onStep: async (s) => {
       let shot: string | undefined;

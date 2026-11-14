@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "attempts_one_submission_uq" ON "application_attempts" USING btree ("application_id") WHERE status in ('submitting', 'submitted');

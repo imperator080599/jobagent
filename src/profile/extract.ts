@@ -199,7 +199,9 @@ function htmlToMarked(html: string): string {
     .replace(/\*{2,3}(\s*)\*{2,3}/g, '$1');
 }
 
-export async function extractDocumentText(file: { filename: string; mime: string; data: Uint8Array }): Promise<ExtractedDocument> {
+export async function extractDocumentText(input: { filename: string; mime: string; data: Uint8Array }): Promise<ExtractedDocument> {
+  // Un Buffer Node (pilote PostgreSQL) est converti : la lecture PDF n'accepte qu'un Uint8Array ordinaire.
+  const file = Buffer.isBuffer(input.data) ? { ...input, data: new Uint8Array(input.data) } : input;
   const kind = sniffKind(file.filename, file.mime, file.data);
   if (!kind) throw badRequest('Format non pris en charge. Importez un fichier PDF, DOCX ou texte.');
   const warnings: string[] = [];

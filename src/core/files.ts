@@ -36,7 +36,11 @@ export async function saveFile(db: Db, f: SaveFileInput): Promise<string> {
 export async function getFile(db: Db, userId: string, id: string) {
   const [row] = await db.select().from(files).where(and(eq(files.id, id), eq(files.userId, userId)));
   if (!row) return null;
-  return { ...row, data: row.data instanceof Uint8Array ? row.data : new Uint8Array(row.data as ArrayBufferLike) };
+  // Le pilote PostgreSQL rend un Buffer Node (sous-classe de Uint8Array) ; certaines bibliothèques
+  // (lecture PDF) le refusent : on rend toujours un Uint8Array ordinaire, copié.
+  const raw = row.data as Uint8Array | ArrayBufferLike;
+  const data = raw instanceof Uint8Array ? (Buffer.isBuffer(raw) ? new Uint8Array(raw) : raw) : new Uint8Array(raw);
+  return { ...row, data };
 }
 
 export async function getFileMeta(db: Db, userId: string, id: string) {

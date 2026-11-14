@@ -771,7 +771,12 @@ export const applicationAttempts = pgTable(
     startedAt: ts('started_at').notNull().defaultNow(),
     finishedAt: ts('finished_at'),
   },
-  (t) => [index('attempts_app_idx').on(t.applicationId, t.startedAt)],
+  (t) => [
+    index('attempts_app_idx').on(t.applicationId, t.startedAt),
+    // Verrou d'envoi tenu par la base : une seule tentative « en cours d'envoi » ou « envoyée » par candidature,
+    // même avec plusieurs exécutions simultanées sur des connexions différentes.
+    uniqueIndex('attempts_one_submission_uq').on(t.applicationId).where(sql`status in ('submitting', 'submitted')`),
+  ],
 );
 
 /** Centre de validation : tout ce qui requiert l'intervention de l'utilisateur. */
