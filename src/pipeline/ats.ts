@@ -144,7 +144,7 @@ export function parseAtsReport(raw: string): { total20: number | null; projected
   if (total != null) return { total20: total, projected20, projectedRange, items, source: 'report', candidates, confidence };
   const scored = items.filter((i) => i.score5 != null);
   if (scored.length >= 3) {
-    // « Ajuste la somme des points sur 20 » : somme des notes rapportée au maximum possible.
+    // Somme des notes des items, rapportée sur 20.
     const sum = scored.reduce((a, i) => a + (i.score5 ?? 0), 0);
     return { total20: Math.round((sum / (scored.length * 5)) * 200) / 10, projected20, projectedRange, items, source: 'items', candidates, confidence: 'fallback' };
   }
@@ -389,7 +389,7 @@ registerMock('ats.analyze', (req) => {
   const present = kws.length - missing.length;
   const kwScore = kws.length ? Math.round((present / kws.length) * 50) / 10 : 3;
   const rows: [string, number, string][] = [
-    ['Présence d’un titre clair et lisible', 4, 'Reprendre l’intitulé exact du poste visé.'],
+    ['Titre du CV', 4, 'Reprendre l’intitulé exact du poste visé.'],
     ['Format du CV', req.documents?.length ? 5 : 4, req.documents?.length ? 'PDF textuel : rien à signaler.' : 'Fournir le CV en PDF textuel.'],
     ['Structure du CV', 4, 'Titres de section clairs.'],
     ['Mots-clés du poste', kwScore, missing.length ? `Intégrer : ${missing.join(', ')}.` : 'Tous les mots-clés principaux sont présents.'],

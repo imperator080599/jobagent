@@ -20,16 +20,17 @@ import { extractDocumentText } from '../../src/profile/extract.js';
 
 const FIXTURE = 'tests/fixtures/cv/camille-durand.pdf';
 
-// Prompt fictif au format « zones à coller », truffé de caractères qu'une normalisation altérerait :
+// Prompt fictif (sans rapport avec un prompt réel) au format « zones à coller », truffé de caractères
+// qu'une normalisation altérerait :
 // espaces insécables (fine et normale), apostrophes et guillemets typographiques, puces, doubles espaces,
 // espaces en fin de ligne, tabulation, fins de ligne Windows, accent décomposé (NFD), émoji.
 const PROMPT = [
-  'Tu possèdes la double expertise en ATS et en recrutement.  Évalue l’efficacité du CV !',
-  'Tu as deux fonctions :\t',
-  '1)   Si on te joint seulement un CV = « Evaluation du CV seul ». Note sur 5 chaque item, somme ajustée sur 20.   ',
-  'o    Présence d’un titre clair et lisible',
-  'o    Les 40 mots clefs les plus utilisés (liste “tous” les mots-clefs manquants)',
-  '2)    Si on te joint un CV et une offre = évaluation selon l’offre. Mêmes items. Cé test est important 🙂',
+  'Rôle\u00a0: évaluateur de CV pour un logiciel de recrutement.  Sois précis et factuel\u202f!',
+  'Méthode :\t',
+  'a)   Lis le CV puis l’offre « telle quelle ». Note chaque critère sur 5, total ramené sur 20.   ',
+  '-    Lisibilité du titre',
+  '-    Couverture des “mots-clés” de l’offre',
+  'b)    Termine par une synthèse. Ce\u0301 contrôle compte 🙂',
   '■ CV : Copier/coller',
   '■ Offre d’emploi : Copier/coller',
 ].join('\r\n');
@@ -166,7 +167,7 @@ describe('enregistrement du prompt', () => {
     expect(raw.headers.get('x-content-sha256')).toBe(sha256(PROMPT));
     // Enregistrer le même texte ne crée pas de nouvelle version ; un seul espace de différence en crée une.
     expect((await api.post('/api/profile/ats-prompt', { content: PROMPT })).data.created).toBe(false);
-    const changed = await api.post('/api/profile/ats-prompt', { content: PROMPT.replace('Tu as deux', 'Tu as  deux') });
+    const changed = await api.post('/api/profile/ats-prompt', { content: PROMPT.replace('Méthode :', 'Méthode  :') });
     expect(changed.data.created).toBe(true);
     expect((await api.post(`/api/profile/ats-prompt/${saved.data.prompt.id}/activate`)).status).toBe(200);
   });
@@ -192,7 +193,7 @@ describe('enregistrement du prompt', () => {
     const same = await api.post('/api/profile/ats-prompt/compare', fileForm(Buffer.from(PROMPT, 'utf8'), 'original.txt', 'text/plain'));
     expect(same.data).toMatchObject({ identical: true, differences: [], version: { storedShaValid: true } });
     expect(same.data.reference.sha256).toBe(same.data.version.sha256);
-    const altered = PROMPT.replace('somme ajustée sur 20', 'somme ajustée sur 10');
+    const altered = PROMPT.replace('total ramené sur 20', 'total ramené sur 10');
     const diff = await api.post('/api/profile/ats-prompt/compare', { content: altered });
     expect(diff.data.identical).toBe(false);
     // « expected » : la référence fournie ; « actual » : la version enregistrée.
