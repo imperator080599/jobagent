@@ -149,7 +149,12 @@ export async function ensureBoardSource(ctx: UserContext, company: Company, hit:
   const parsed = connector.configSchema.safeParse(withDisplayName(hit.type, hit.config, company.name));
   if (!parsed.success) return null;
   const existing = await ctx.db.select().from(sources).where(and(eq(sources.userId, ctx.userId), eq(sources.type, hit.type)));
-  const idOf = (cfg: Record<string, unknown>) => JSON.stringify(Object.entries(cfg).filter(([k]) => k !== (DISPLAY_FIELD[hit.type] ?? 'name')).sort());
+  // Identité d'un site : configuration complétée par ses valeurs par défaut, nom affiché exclu.
+  const display = DISPLAY_FIELD[hit.type] ?? 'name';
+  const idOf = (cfg: Record<string, unknown>) => {
+    const full = connector.configSchema.safeParse({ ...cfg, [display]: 'x' });
+    return JSON.stringify(Object.entries(full.success ? full.data : cfg).filter(([k]) => k !== display).sort());
+  };
   const same = existing.find((s) => idOf(s.config as Record<string, unknown>) === idOf(parsed.data) || s.companyId === company.id);
   if (same) return same.id;
   const name = `${company.name} (${connector.label})`;

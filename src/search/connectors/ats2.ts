@@ -1,6 +1,7 @@
 // Autres plateformes de sites carrières, lues par les flux publics qu'utilisent leurs
 // propres pages carrières (aucune authentification, aucune protection contournée).
-//  - Personio (flux XML) et Breezy HR (JSON) : formes vérifiées sur des sites réels (novembre 2026).
+//  - Personio (flux XML) et Breezy HR (JSON) : formes vérifiées sur des sites réels (novembre 2026) ;
+//    Greenhouse, Lever, Ashby et SmartRecruiters (ats.ts) ont été relus en conditions réelles le même jour.
 //  - Workable, Recruitee, Workday : implémentés d'après les points d'accès publics de leurs pages
 //    carrières ; non vérifiés en conditions réelles depuis l'environnement de développement
 //    (limitation de débit, hôte injoignable). La couverture ne les montre « opérationnels »
@@ -32,15 +33,16 @@ export const personio: Connector = {
     { key: 'name', label: "Nom de l'entreprise", placeholder: 'Acme', required: true },
     { key: 'domain', label: 'Domaine', placeholder: 'de ou com', hint: 'com pour un site en .jobs.personio.com.' },
   ],
-  configSchema: z.object({ company: slug, name: company, domain: z.enum(['de', 'com']).default('de') }),
+  configSchema: z.object({ company: slug, name: company, domain: z.enum(['de', 'com']).default('de'), language: z.enum(['en', 'fr', 'de', 'es', 'it', 'nl']).default('en') }),
   detect(url) {
     const m = /^([a-z0-9-]+)\.jobs\.personio\.(de|com)$/.exec(url.hostname);
     return m ? { config: { company: m[1], name: m[1], domain: m[2] }, name: m[1]! } : null;
   },
   async run(ctx, { config, emit }) {
-    const { company: c, name, domain } = config as { company: string; name: string; domain?: string };
+    const { company: c, name, domain, language } = config as { company: string; name: string; domain?: string; language?: string };
     const base = `https://${c}.jobs.personio.${domain === 'com' ? 'com' : 'de'}`;
-    const res = await fetchText(ctx, `${base}/xml`, { minIntervalMs: PAUSE, maxBytes: 30_000_000 });
+    // Sans paramètre de langue, le flux ne contient pas le texte des offres (constaté sur un site réel).
+    const res = await fetchText(ctx, `${base}/xml?language=${language ?? 'en'}`, { minIntervalMs: PAUSE, maxBytes: 30_000_000 });
     const blocks = res.text.match(/<position>[\s\S]*?<\/position>/g) ?? [];
     for (const b of blocks) {
       const id = tag(b, 'id');
