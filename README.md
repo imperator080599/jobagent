@@ -1,19 +1,23 @@
 # JobAgent
 
-Assistant personnel de recherche d'emploi et de candidature. Il cherche les offres, les
-sélectionne, les analyse avec **votre** prompt ATS, prépare un CV et une lettre dans **vos**
-templates, suit vos candidatures et les réponses reçues — et vous demande votre avis au seul
-endroit prévu pour cela : le centre de validation.
+Assistant personnel de recherche d'emploi et de candidature. Il cherche les offres (sites
+carrières, ATS, alertes e-mail), les sélectionne, les analyse avec **votre** prompt ATS, prépare un
+CV et une lettre dans **vos** templates, remplit les formulaires de candidature et, quand vos règles
+et la plateforme le permettent, les envoie ; il suit ensuite les réponses et prépare vos entretiens —
+et ne vous sollicite que pour les exceptions, au seul endroit prévu : le centre de validation.
 
 Trois principes tiennent tout le reste :
 
 - **Votre CV master est la seule source de vérité.** Aucun agent n'invente une expérience, un
   chiffre, une compétence ou une date. Chaque reformulation est contrôlée par du code, puis par
   un second modèle ; ce qui n'est pas étayé est refusé et le texte d'origine conservé.
-- **Rien ne part sans vous.** Une candidature n'est « envoyée » que lorsque vous l'avez déclarée,
-  « confirmée » qu'avec un accusé de réception. Aucun email n'est envoyé : au mieux un brouillon.
+- **Rien ne part hors de vos règles.** Une candidature n'est envoyée automatiquement que si elle
+  remplit vos règles AUTOPILOT (validées une fois) et que la plateforme le permet ; sinon elle vous
+  est présentée. Elle n'est « envoyée » qu'avec une confirmation réelle (page de confirmation,
+  accusé de réception ou votre déclaration). Aucun email n'est envoyé : au mieux un brouillon.
 - **Aucun contournement.** Les sources sont lues par leurs accès officiels ; un refus d'accès,
-  un CAPTCHA ou un robots.txt sont respectés. LinkedIn et Indeed ne sont jamais lus automatiquement.
+  un CAPTCHA ou un robots.txt sont respectés. LinkedIn, Indeed et Welcome to the Jungle ne sont
+  jamais lus ni automatisés : leurs offres arrivent par vos alertes e-mail.
 
 ## Démarrage rapide (poste de travail)
 
@@ -79,6 +83,9 @@ jamais réaffichés.
 ## Documentation
 
 - [Architecture](docs/architecture.md) — composants, agents, données, sécurité.
+- [Moteur de candidature](docs/moteur-de-candidature.md) — remplissage, envoi, AUTOPILOT, interventions, extension.
+- [Plateformes](docs/plateformes.md) — ce qui est permis sur chaque plateforme, et la preuve.
+- [Intégrité du prompt ATS](docs/integrite-prompt-ats.md) — ce qui est transmis au modèle et comment le vérifier.
 - [Intégrations externes](docs/integrations.md) — IA, sources d'offres, Gmail, LinkedIn, notifications.
 - [Déploiement](docs/deploiement.md) — mise en ligne pour un fonctionnement ordinateur éteint.
 - [Sauvegarde et restauration](docs/sauvegarde-restauration.md).
