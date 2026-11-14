@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "JobAgent — candidatures",
+  "version": "1.0.0",
+  "description": "Remplit vos formulaires de candidature avec vos réponses validées dans JobAgent. L'envoi reste toujours entre vos mains.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.myworkdaysite.com/*",
+    "https://*.workable.com/*",
+    "https://*.recruitee.com/*",
+    "https://*.jobs.personio.de/*",
+    "https://*.jobs.personio.com/*",
+    "https://*.teamtailor.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.icims.com/*",
+    "https://*.taleo.net/*",
+    "https://*.successfactors.com/*",
+    "https://*.successfactors.eu/*",
+    "https://*.breezy.hr/*",
+    "https://*.jobvite.com/*",
+    "https://*.bamboohr.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JobAgent"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.myworkdaysite.com/*",
+        "https://*.workable.com/*",
+        "https://*.recruitee.com/*",
+        "https://*.jobs.personio.de/*",
+        "https://*.jobs.personio.com/*",
+        "https://*.teamtailor.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.icims.com/*",
+        "https://*.taleo.net/*",
+        "https://*.successfactors.com/*",
+        "https://*.successfactors.eu/*",
+        "https://*.breezy.hr/*",
+        "https://*.jobvite.com/*",
+        "https://*.bamboohr.com/*"
+      ],
+      "js": [
+        "inpage.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

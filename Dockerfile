@@ -25,6 +25,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY src ./src
 COPY drizzle ./drizzle
+COPY extension ./extension
+# Navigateur du moteur de candidature (Chromium piloté par Playwright), lisible par l'utilisateur sans privilèges.
+ARG WITH_BROWSER=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN if [ "$WITH_BROWSER" = "1" ]; then npx playwright-core install --with-deps chromium && chmod -R a+rX /ms-playwright; fi
 COPY tsconfig.json tsconfig.server.json ./
 # Utilisateur sans privilèges ; /data n'est utilisé que sans Postgres externe (base embarquée).
 RUN useradd --create-home --uid 10001 app && mkdir -p /data && chown app:app /data

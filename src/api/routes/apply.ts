@@ -41,6 +41,18 @@ export function applyRoutes(deps: AppDeps) {
 
   r.get('/metrics', async (c) => c.json(await automationMetrics(c.get('uctx'))));
 
+  /** Paquet de l'extension de navigateur (à charger en mode développeur), avec le lecteur de formulaires du moteur. */
+  r.get('/extension-package', sessionOnly, async (c) => {
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { zipSync, strToU8 } = await import('fflate');
+    const root = new URL('../../../extension/', import.meta.url);
+    const entries: Record<string, Uint8Array> = {};
+    for (const name of readdirSync(root)) entries[`jobagent-extension/${name}`] = new Uint8Array(readFileSync(new URL(name, root)));
+    entries['jobagent-extension/inpage.js'] = strToU8(readFileSync(new URL('../../apply/engine/inpage.js', import.meta.url), 'utf8'));
+    const zip = zipSync(entries, { level: 6 });
+    return new Response(zip, { headers: { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="jobagent-extension.zip"', 'cache-control': 'no-store' } });
+  });
+
   r.get('/:jobId/plan', async (c) => c.json(await planAutomation(c.get('uctx'), c.req.param('jobId'))));
 
   r.get('/:jobId/attempts', async (c) => c.json({ attempts: await listAttempts(c.get('uctx'), c.req.param('jobId')) }));
@@ -84,14 +96,33 @@ export function applyRoutes(deps: AppDeps) {
     const [app] = await ctx.db.select().from(applications).where(and(eq(applications.userId, uctx.userId), eq(applications.jobId, job.id)));
     const [cv] = app?.cvVersionId ? await ctx.db.select().from(cvVersions).where(and(eq(cvVersions.id, app.cvVersionId), eq(cvVersions.userId, uctx.userId))) : [];
     const [letter] = app?.letterId ? await ctx.db.select().from(letters).where(and(eq(letters.id, app.letterId), eq(letters.userId, uctx.userId))) : [];
-    const docs = {
-      resume: cv?.pdfFileId ? { fileId: cv.pdfFileId, filename: `CV.pdf` } : null,
-      coverLetter: letter?.pdfFileId ? { fileId: letter.pdfFileId, filename: `Lettre.pdf` } : null,
-      letterText: letter?.text ?? '',
+    const { getFileMeta } = await import('../../core/files.js');
+    const meta = async (id: string | null | undefined) => {
+      const m = id ? await getFileMeta(ctx.db, uctx.userId, id) : null;
+      return m ? { fileId: m.id, filename: m.filename } : null;
     };
+    const docs = { resume: await meta(cv?.pdfFileId), resumeDocx: await meta(cv?.docxFileId), coverLetter: await meta(letter?.pdfFileId), coverLetterDocx: await meta(letter?.docxFileId), letterText: letter?.text ?? '' };
     const autopilot = await getSetting(ctx.db, uctx.userId, 'application.autopilot');
     const fields = await resolveFields(uctx, input.fields, { job, cv: cv ?? null, docs, autopilot, sourceLabel: '' });
     return c.json({ platform, fields, stats: fillStats(fields) });
+  });
+
+  /** Document d'une candidature en cours (CV ou lettre validés), pour que l'extension le joigne au formulaire. */
+  r.get('/extension/file/:jobId/:fileId', requireScope('apply'), async (c) => {
+    const uctx = c.get('uctx');
+    const job = await getJob(uctx, c.req.param('jobId'));
+    if (!['ready_to_apply', 'applying'].includes(job.stage)) return c.json({ error: { code: 'not_ready', message: "Cette candidature n'est pas en cours." } }, 409);
+    const [app] = await ctx.db.select().from(applications).where(and(eq(applications.userId, uctx.userId), eq(applications.jobId, job.id)));
+    const [cv] = app?.cvVersionId ? await ctx.db.select().from(cvVersions).where(and(eq(cvVersions.id, app.cvVersionId), eq(cvVersions.userId, uctx.userId))) : [];
+    const [letter] = app?.letterId ? await ctx.db.select().from(letters).where(and(eq(letters.id, app.letterId), eq(letters.userId, uctx.userId))) : [];
+    // Uniquement les documents validés de CETTE candidature.
+    const allowed = [cv?.pdfFileId, cv?.docxFileId, letter?.pdfFileId, letter?.docxFileId].filter(Boolean);
+    const fileId = c.req.param('fileId');
+    if (!allowed.includes(fileId)) return c.json({ error: { code: 'forbidden', message: "Ce document n'appartient pas à cette candidature." } }, 403);
+    const { getFile } = await import('../../core/files.js');
+    const f = await getFile(ctx.db, uctx.userId, fileId);
+    if (!f) return c.json({ error: { code: 'not_found', message: 'Document introuvable.' } }, 404);
+    return new Response(Buffer.from(f.data), { headers: { 'content-type': f.mime, 'x-filename': encodeURIComponent(f.filename), 'cache-control': 'private, no-store' } });
   });
 
   /** Confirmation lue par l'extension après votre envoi : la candidature est enregistrée avec sa preuve. */

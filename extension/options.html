@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>JobAgent — réglages</title>
+<style>body{font:14px/1.5 system-ui,sans-serif;max-width:560px;margin:24px auto;color:#0f172a}label{display:block;margin-top:14px;font-weight:600}input{width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:8px;margin-top:4px}button{margin-top:16px;padding:8px 14px;border-radius:8px;border:0;background:#4f46e5;color:#fff;cursor:pointer}p.note{color:#475569;font-size:13px}</style></head>
+<body>
+<h1>JobAgent</h1>
+<p class="note">Créez un jeton à portée « apply » dans JobAgent (Paramètres → Accès), puis collez-le ici. Le jeton ne donne accès qu'au remplissage des candidatures en cours ; vous pouvez le révoquer à tout moment.</p>
+<label for="server">Adresse de votre JobAgent</label><input id="server" placeholder="https://jobagent.example.com">
+<label for="token">Jeton d'accès (portée « apply »)</label><input id="token" type="password" autocomplete="off">
+<button id="save">Enregistrer et tester</button>
+<p id="status" class="note"></p>
+<script src="options.js"></script>
+</body></html>

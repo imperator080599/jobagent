@@ -41,12 +41,26 @@ export const csrfGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
   return next();
 };
 
+/**
+ * Routes accessibles à un jeton d'API, par portée. Tout le reste est réservé aux sessions :
+ * un jeton volé (extension, signet) ne donne accès ni au profil, ni aux documents, ni aux réglages.
+ */
+const TOKEN_ROUTES: Record<string, RegExp[]> = {
+  capture: [/^\/api\/jobs\/?$/, /^\/api\/jobs\/check\/?$/],
+  apply: [/^\/api\/apply\/extension\//],
+  worker: [/^\/api\/cron\//],
+};
+const ANY_TOKEN = [/^\/api\/me\/?$/];
+
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const ctx = c.get('ctx');
   const bearer = c.req.header('authorization');
   if (bearer?.startsWith('Bearer ')) {
     const found = await getApiTokenUser(ctx.db, bearer.slice(7).trim());
     if (!found) throw unauthorized('Jeton invalide ou révoqué.');
+    const path = c.req.path;
+    const allowed = ANY_TOKEN.some((re) => re.test(path)) || found.scopes.some((s) => s === '*' || (TOKEN_ROUTES[s] ?? []).some((re) => re.test(path)));
+    if (!allowed) throw forbidden('Ce jeton ne donne pas accès à cette ressource.');
     c.set('user', found.user);
     c.set('uctx', forUser(ctx, found.user.id));
     c.set('authKind', 'token');
