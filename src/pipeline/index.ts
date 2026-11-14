@@ -6,6 +6,7 @@ import type { UserContext } from '../core/context.js';
 import { ConfigError, NeedsHumanError } from '../core/errors.js';
 import { raiseAction, resolveActionsFor } from '../core/inbox.js';
 import { enqueue } from '../core/queue.js';
+import { getSetting } from '../core/settings.js';
 import { cvVersions, jobs, letters } from '../db/schema.js';
 import { FetchError } from '../search/http.js';
 import { descriptionHash } from '../search/normalize.js';
@@ -20,6 +21,7 @@ import { masterFor } from './brief.js';
 import { refreshQualification, runQualification } from './qualify.js';
 import { afterAnalysis } from './review.js';
 import { registerTaskHandler } from './worker.js';
+import './interview.js';
 
 const payloadOf = (p: unknown) => (p ?? {}) as { jobId?: string; manual?: boolean; force?: boolean; thenTailor?: boolean; requalify?: boolean; instructions?: string };
 
@@ -111,11 +113,38 @@ async function explainAts(ctx: UserContext, job: Job, err: unknown) {
   await raiseAction(ctx.db, { userId: ctx.userId, type: 'job.ats_problem', title: `Analyse ATS à vérifier : ${job.companyName} — ${job.title}`, body: { text: ATS_PROBLEMS[err.reason], detail: err.message, link: `/offres/${job.id}` }, jobId: job.id, priority: 75, dedupKey: `job.ats_problem:${job.id}`, reopen: true });
 }
 
+/**
+ * L'offre est-elle toujours ouverte ? Vérifié sur sa page avant d'engager la préparation.
+ * Seule une réponse explicite (page introuvable ou annonce clôturée) arrête la candidature ;
+ * un incident réseau ne bloque rien.
+ */
+async function offerClosed(ctx: UserContext, job: Job): Promise<boolean> {
+  const url = job.canonicalUrl || job.applyUrl;
+  if (!url || /linkedin\.com|indeed\.|welcometothejungle\.com/.test(url)) return false;
+  let closed = false;
+  let reason = '';
+  try {
+    const page = await fetchJobPage(ctx, url);
+    closed = page.closed;
+    reason = "l'annonce indique qu'elle n'est plus ouverte";
+  } catch (err) {
+    if (err instanceof FetchError && (err.status === 404 || err.status === 410)) {
+      closed = true;
+      reason = `page de l'offre introuvable (${err.status})`;
+    }
+  }
+  if (!closed) return false;
+  await setStage(ctx, job.id, 'expired', { actor: 'agent:search', reason, soft: true, patch: { expiredAt: ctx.now() } });
+  await raiseAction(ctx.db, { userId: ctx.userId, type: 'system.alert', title: `Offre retirée : ${job.companyName} — ${job.title}`, body: { text: `Préparation arrêtée : ${reason}. Aucun document n'a été produit.`, link: `/offres/${job.id}` }, jobId: job.id, priority: 50, dedupKey: `job.closed:${job.id}` });
+  return true;
+}
+
 registerTaskHandler('job.tailor', async (ctx, task) => {
   const p = payloadOf(task.payload);
   if (!p.jobId) return { skipped: 'no_job' };
   const job = await getJob(ctx, p.jobId);
   if (job.stage !== 'cv_in_progress') return { skipped: `statut ${job.stage}` };
+  if (await offerClosed(ctx, job)) return { skipped: 'offre retirée' };
   try {
     const master = await masterFor(ctx, job.language || undefined);
     const reference = await latestAnalysis(ctx, job.id, master.id);
@@ -143,6 +172,27 @@ registerTaskHandler('job.tailor', async (ctx, task) => {
     throw err;
   }
 });
+
+/**
+ * AUTOPILOT : si vos règles sont toutes remplies et que vous avez autorisé la validation automatique des
+ * documents, ceux qui passent tous les contrôles (rendu, véracité, doublon, offre ouverte) sont validés et la
+ * candidature part aussitôt vers le moteur. Sinon, ils vous sont présentés.
+ */
+async function autopilotApproval(ctx: UserContext, jobId: string): Promise<boolean> {
+  const ap = await getSetting(ctx.db, ctx.userId, 'application.autopilot');
+  const auto = await getSetting(ctx.db, ctx.userId, 'application.autonomous');
+  if (!ap.enabled || !auto.autoApproveDocuments) return false;
+  const { buildPack, approveApplication } = await import('../apply/service.js');
+  const pack = await buildPack(ctx, jobId);
+  const blocking = pack.qa.checks.filter((c) => !c.ok);
+  if (blocking.length) return false;
+  const { planAutomation } = await import('../apply/automation.js');
+  const plan = await planAutomation(ctx, jobId);
+  const rules = plan.checks.filter((c) => !['documents', 'platform', 'url', 'dry_run'].includes(c.id));
+  if (!rules.every((c) => c.ok)) return false;
+  await approveApplication(ctx, jobId, { send: true, actor: 'autopilot', withoutLetter: !pack.letter });
+  return true;
+}
 
 /** Présente les documents prêts dans le centre de validation. Rien n'est envoyé à ce stade. */
 export async function raiseValidation(ctx: UserContext, jobId: string): Promise<void> {
@@ -193,7 +243,7 @@ registerTaskHandler('job.letter', async (ctx, task) => {
     const [cv] = await ctx.db.select({ id: cvVersions.id }).from(cvVersions).where(and(eq(cvVersions.userId, ctx.userId), eq(cvVersions.jobId, job.id), eq(cvVersions.kind, 'application'))).orderBy(desc(cvVersions.createdAt)).limit(1);
     const run = await writeLetter(ctx, job, { master, cvVersionId: cv?.id ?? null, instructions: p.instructions });
     await setStage(ctx, job.id, 'ready_to_apply', { actor: 'agent:letter', reason: `lettre rédigée (${run.words} mots)`, soft: true });
-    await raiseValidation(ctx, job.id);
+    if (!(await autopilotApproval(ctx, job.id))) await raiseValidation(ctx, job.id);
     return { letterId: run.letter.id, words: run.words, issues: run.issues.length, renderOk: run.render.ok };
   } catch (err) {
     await explain(ctx, err);

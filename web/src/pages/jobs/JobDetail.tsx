@@ -12,6 +12,7 @@ import { errorText } from '../../lib/hooks';
 import { ChangeList, FeedbackForm, SubmittedModal } from '../inbox/JobReviewCard';
 import { AtsPill, Report, ScoreBar, StageBadge, contractLabel, fileUrl, jobPlace, type Job } from './shared';
 import { AutomationPanel } from './AutomationPanel';
+import { type Interview, InterviewTab } from './InterviewPrep';
 
 interface Detail {
   job: Job;
@@ -22,9 +23,10 @@ interface Detail {
   letters: { id: string; status: string; language: string; text: string; checks: any; pdfFileId: string | null; docxFileId: string | null; createdAt: string }[];
   application: any | null;
   actions: { id: string; type: string; body: any }[];
+  interviews: Interview[];
 }
 
-type Tab = 'analysis' | 'documents' | 'offer' | 'history';
+type Tab = 'analysis' | 'documents' | 'interview' | 'offer' | 'history';
 const ACTORS: Record<string, string> = { user: 'Vous', system: 'Système', 'agent:qualification': 'Agent de qualification', 'agent:ats': 'Agent ATS', 'agent:cv': 'Agent CV', 'agent:letter': 'Agent lettre' };
 const PRE_DECISION: Stage[] = ['new', 'to_analyze', 'analyzed', 'awaiting_feedback', 'filtered', 'abandoned'];
 const PRE_SUBMIT: Stage[] = [...PRE_DECISION, 'cv_in_progress', 'letter_in_progress', 'ready_to_apply', 'applying', 'expired'];
@@ -180,6 +182,7 @@ export function JobDetail({ id }: { id: string }) {
   const job = q.data?.job;
   useEffect(() => {
     if (job && (job.stage === 'cv_in_progress' || job.stage === 'letter_in_progress' || job.stage === 'ready_to_apply')) setTab((t) => (t === 'analysis' ? 'documents' : t));
+    if (job && ['interview_hr', 'interview_tech', 'offer'].includes(job.stage)) setTab((t) => (t === 'analysis' ? 'interview' : t));
   }, [job?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (q.isLoading) return <Loading />;
@@ -309,6 +312,7 @@ export function JobDetail({ id }: { id: string }) {
         tabs={[
           { id: 'analysis', label: 'Analyse' },
           { id: 'documents', label: 'Documents', count: d.cvVersions.length + d.letters.length || undefined },
+          ...(d.interviews?.length ? [{ id: 'interview' as const, label: 'Entretien' }] : []),
           { id: 'offer', label: 'Annonce' },
           { id: 'history', label: 'Historique' },
         ]}
@@ -476,6 +480,8 @@ export function JobDetail({ id }: { id: string }) {
           {['ready_to_apply', 'applying', 'sent', 'confirmed'].includes(job.stage) && <AutomationPanel jobId={job.id} stage={job.stage} />}
         </div>
       )}
+
+      {tab === 'interview' && <InterviewTab jobId={job.id} interviews={d.interviews ?? []} />}
 
       {tab === 'offer' && (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">

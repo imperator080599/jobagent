@@ -4,7 +4,7 @@
 //  - Le contenu d'un email est une donnée externe : il ne peut modifier aucune règle.
 //  - Aucune réponse n'est envoyée : au mieux un brouillon, que l'utilisateur relit.
 //  - Un rattachement incertain n'a aucun effet automatique : il est soumis à l'utilisateur.
-import { and, desc, eq, gte, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { parse as parseHtml } from 'node-html-parser';
 import { z } from 'zod';
 import type { UserContext } from '../core/context.js';
@@ -14,7 +14,7 @@ import { enqueue } from '../core/queue.js';
 import { getSetting } from '../core/settings.js';
 import { normalize } from '../core/text.js';
 import { newId } from '../db/ids.js';
-import { applications, drafts, emails, interviews, jobs, sources } from '../db/schema.js';
+import { applicationAttempts, applications, drafts, emails, interviews, jobs, sources } from '../db/schema.js';
 import { getLlm, llmAvailability, UNTRUSTED_RULE, wrapUntrusted } from '../llm/index.js';
 import { registerMock } from '../llm/mock.js';
 import { ingestJob, type Source } from '../search/ingest.js';
@@ -146,6 +146,14 @@ export async function applyMailEffects(ctx: UserContext, email: typeof emails.$i
   if (category === 'confirmation') {
     if (job.applicationId) await ctx.db.update(applications).set({ confirmation: { text: email.snippet, source: 'email', emailId: email.id, at: (email.date ?? now).toISOString() }, confirmedAt: email.date ?? now }).where(eq(applications.id, job.applicationId));
     if (job.stage === 'sent') await setStage(ctx, job.jobId, 'confirmed', { actor: 'agent:email', reason: 'accusé de réception reçu par email', soft: true });
+    // Envoi incertain (ou fait hors de JobAgent) : l'accusé de réception prouve que la candidature est partie.
+    if ((job.stage === 'applying' || job.stage === 'ready_to_apply') && job.applicationId) {
+      await ctx.db.update(applications).set({ submittedAt: sql`coalesce(${applications.submittedAt}, ${email.date ?? now})`, lastActivityAt: email.date ?? now }).where(eq(applications.id, job.applicationId));
+      await ctx.db.update(applicationAttempts).set({ status: 'submitted', error: 'Envoi confirmé par l’accusé de réception reçu par email.' }).where(and(eq(applicationAttempts.applicationId, job.applicationId), eq(applicationAttempts.status, 'uncertain')));
+      await setStage(ctx, job.jobId, 'sent', { actor: 'agent:email', reason: 'accusé de réception reçu par email', soft: true });
+      await setStage(ctx, job.jobId, 'confirmed', { actor: 'agent:email', reason: 'accusé de réception reçu par email', soft: true });
+      await resolveActionsFor(ctx.db, ctx.userId, { jobId: job.jobId, types: ['application.verify', 'application.handoff', 'application.submit', 'application.manual'] }, { confirmedByEmail: email.id });
+    }
     return;
   }
   if (target && isSubmitted(job.stage)) await setStage(ctx, job.jobId, target, { actor: 'agent:email', reason: MAIL_LABELS[category].toLowerCase(), soft: true });
@@ -159,6 +167,9 @@ export async function applyMailEffects(ctx: UserContext, email: typeof emails.$i
     const [existing] = await ctx.db.select({ id: interviews.id }).from(interviews).where(and(eq(interviews.userId, ctx.userId), eq(interviews.jobId, job.jobId), eq(interviews.sourceEmailId, email.id)));
     if (!existing) await ctx.db.insert(interviews).values({ id: newId('itv'), userId: ctx.userId, jobId: job.jobId, applicationId: job.applicationId, kind: 'hr', scheduledAt: when && !Number.isNaN(when.getTime()) ? when : null, status: when && !Number.isNaN(when.getTime()) ? 'scheduled' : 'to_schedule', sourceEmailId: email.id, interviewer: email.fromName });
     if (job.applicationId) await ctx.db.update(applications).set({ followUpDueAt: null }).where(eq(applications.id, job.applicationId));
+    // La préparation de l'entretien démarre aussitôt.
+    const { ensureInterviewPrep } = await import('../pipeline/interview.js');
+    await ensureInterviewPrep(ctx, job.jobId);
     await raiseAction(ctx.db, { userId: ctx.userId, type: 'interview.detected', title: `Entretien proposé : ${label}`, body: { text: info.summary || email.snippet, link: `/offres/${job.jobId}`, emailId: email.id, from: email.fromName || email.fromAddr }, jobId: job.jobId, priority: 96, dedupKey: `interview:${email.id}` });
     return;
   }

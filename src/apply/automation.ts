@@ -32,6 +32,12 @@ import type { FormField } from './questions.js';
 import { type ApplicationDocs, fillStats, type ResolvedField, resolveFields } from './resolve.js';
 
 export type Attempt = typeof applicationAttempts.$inferSelect;
+
+/**
+ * Navigateur et contexte injectables (tests : formulaires de démonstration servis localement).
+ * En production, rien n'est défini : le moteur lance son propre navigateur.
+ */
+export const automationHooks: { browser?: Browser; prepareContext?: (c: import('playwright-core').BrowserContext) => Promise<void> } = {};
 type Autopilot = SettingValue<'application.autopilot'>;
 
 export interface AutomationPlan {
@@ -232,8 +238,8 @@ export async function runAutomation(ctx: UserContext, jobId: string, opts: { bro
   const result: RunResult = await runApplication({
     url: plan.url,
     mode: plan.mode,
-    browser: opts.browser,
-    prepareContext: opts.prepareContext,
+    browser: opts.browser ?? automationHooks.browser,
+    prepareContext: opts.prepareContext ?? automationHooks.prepareContext,
     files,
     allowPlatform: (p) => policyFor(p).autonomy !== 'manual',
     resolve: (fields: FormField[]) => resolveFields(ctx, fields, { job, cv, docs, autopilot: ap, sourceLabel: label }),

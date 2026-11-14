@@ -66,7 +66,22 @@ export async function afterAnalysis(ctx: UserContext, job: Job, r: AtsRunResult,
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const [startedToday] = await ctx.db.select({ n: sql<number>`count(*)::int` }).from(stageHistory).where(and(eq(stageHistory.userId, ctx.userId), eq(stageHistory.toStage, 'cv_in_progress'), eq(stageHistory.actor, 'agent:ats'), gte(stageHistory.at, dayStart)));
   const underCap = auto.maxPerDay > 0 && (startedToday?.n ?? 0) < auto.maxPerDay;
-  const autoOk = mode === 'autonomous' && underCap && score != null && score >= auto.minAtsScore && (job.priorityScore ?? 0) >= auto.minPriority && !flags.injection?.length && !(q.blockers?.length ?? 0) && !r.parsed.scoreConflict;
+  const safe = !flags.injection?.length && !(q.blockers?.length ?? 0) && !r.parsed.scoreConflict && r.analysis.status === 'ok';
+  const autonomousOk = mode === 'autonomous' && underCap && score != null && score >= auto.minAtsScore && (job.priorityScore ?? 0) >= auto.minPriority;
+  // AUTOPILOT : mêmes exigences que pour l'envoi (pays, contrat, intitulé, note attribuée, priorité).
+  const ap = await getSetting(ctx.db, ctx.userId, 'application.autopilot');
+  const norm = (s: string) => normalize(s);
+  const autopilotOk =
+    ap.enabled &&
+    underCap &&
+    score != null &&
+    score >= ap.minAtsScore &&
+    (job.priorityScore ?? 0) >= ap.minPriority &&
+    (!ap.countries.length || ap.countries.map((c) => c.toUpperCase()).includes((job.country || '').toUpperCase())) &&
+    (!ap.contracts.length || ap.contracts.map(norm).includes(norm(job.contractType || ''))) &&
+    (!ap.titleKeywords.length || ap.titleKeywords.some((k) => norm(job.title).includes(norm(k)))) &&
+    !ap.excludeKeywords.some((k) => norm(`${job.title} ${job.descriptionText.slice(0, 4000)}`).includes(norm(k)));
+  const autoOk = safe && (autonomousOk || autopilotOk);
   if (autoOk) {
     await setStage(ctx, job.id, 'analyzed', { actor: 'agent:ats', reason, soft: true });
     await setStage(ctx, job.id, 'cv_in_progress', { actor: 'agent:ats', reason: 'mode autonome : conditions réunies', soft: true });

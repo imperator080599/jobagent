@@ -6,7 +6,7 @@ import { logActivity } from '../../core/activity.js';
 import { badRequest, conflict, HttpError } from '../../core/errors.js';
 import { resolveAction } from '../../core/inbox.js';
 import { enqueue, unblockTasks } from '../../core/queue.js';
-import { actionItems, applications, atsAnalyses, cvVersions, jobSightings, jobs, letters, sources } from '../../db/schema.js';
+import { actionItems, applications, atsAnalyses, cvVersions, interviews, jobSightings, jobs, letters, sources } from '../../db/schema.js';
 import { extractJobFields } from '../../search/extract.js';
 import { FetchError } from '../../search/http.js';
 import { checkExistingJob, ingestJob, manualSource, mergeJobs, normalizeJob, type ExistingJobVerdict, type RawJob } from '../../search/ingest.js';
@@ -176,7 +176,7 @@ export function jobsRoutes(deps: AppDeps) {
   r.get('/:id', async (c) => {
     const uctx = c.get('uctx');
     const job = await getJob(uctx, c.req.param('id'));
-    const [sightings, history, analyses, cvs, lets, [application], todo] = await Promise.all([
+    const [sightings, history, analyses, cvs, lets, [application], todo, itvs] = await Promise.all([
       ctx.db
         .select({ id: jobSightings.id, url: jobSightings.url, firstSeenAt: jobSightings.firstSeenAt, lastSeenAt: jobSightings.lastSeenAt, goneAt: jobSightings.goneAt, sourceName: sources.name, sourceType: sources.type })
         .from(jobSightings)
@@ -193,10 +193,11 @@ export function jobsRoutes(deps: AppDeps) {
       ctx.db.select().from(letters).where(and(eq(letters.jobId, job.id), eq(letters.userId, uctx.userId))).orderBy(desc(letters.createdAt)),
       ctx.db.select().from(applications).where(and(eq(applications.jobId, job.id), eq(applications.userId, uctx.userId))),
       ctx.db.select().from(actionItems).where(and(eq(actionItems.jobId, job.id), eq(actionItems.userId, uctx.userId), inArray(actionItems.status, ['open', 'snoozed']))),
+      ctx.db.select().from(interviews).where(and(eq(interviews.jobId, job.id), eq(interviews.userId, uctx.userId))).orderBy(desc(interviews.createdAt)),
     ]);
     // Le message exact envoyé au modèle est volumineux : il est servi à part (/jobs/:id/ats/:analysisId/request).
     const light = analyses.map(({ requestText, ...a }) => ({ ...a, requestChars: requestText.length }));
-    return c.json({ job, sightings, history, analyses: light, cvVersions: cvs, letters: lets, application: application ?? null, actions: todo });
+    return c.json({ job, sightings, history, analyses: light, cvVersions: cvs, letters: lets, application: application ?? null, actions: todo, interviews: itvs });
   });
 
   /** Message exact transmis au modèle pour une analyse ATS (prompt + CV + offre), avec son empreinte. */
@@ -290,7 +291,21 @@ export function jobsRoutes(deps: AppDeps) {
   r.post('/:id/stage', sessionOnly, async (c) => {
     const input = await body(c, z.object({ to: z.enum(STAGES), reason: z.string().max(500).optional() }));
     const job = await setStage(c.get('uctx'), c.req.param('id'), input.to, { actor: 'user', reason: input.reason });
+    // Entretien déclaré : la préparation démarre aussitôt.
+    if (input.to === 'interview_hr' || input.to === 'interview_tech') {
+      const { ensureInterviewPrep } = await import('../../pipeline/interview.js');
+      await ensureInterviewPrep(c.get('uctx'), job.id, { kind: input.to === 'interview_tech' ? 'technical' : 'hr' });
+      deps.kick(c);
+    }
     return c.json({ job });
+  });
+
+  /** (Re)génère la préparation de l'entretien. */
+  r.post('/:id/interview/prepare', sessionOnly, async (c) => {
+    const { ensureInterviewPrep } = await import('../../pipeline/interview.js');
+    const id = await ensureInterviewPrep(c.get('uctx'), c.req.param('id'), { force: true });
+    deps.kick(c);
+    return c.json({ interviewId: id });
   });
 
   r.post('/:id/merge', sessionOnly, async (c) => {

@@ -35,6 +35,7 @@ const TYPE_LABELS: Record<string, { label: string; tone: 'brand' | 'warning' | '
   'application.question': { label: 'Question de formulaire', tone: 'warning' },
   'email.review': { label: 'Email', tone: 'info' },
   'interview.detected': { label: 'Entretien', tone: 'success' },
+  'interview.prep_ready': { label: 'Préparation d’entretien', tone: 'success' },
   'followup.due': { label: 'Relance', tone: 'info' },
   'system.alert': { label: 'Alerte', tone: 'danger' },
   'job.ats_problem': { label: 'Analyse ATS', tone: 'danger' },
