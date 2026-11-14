@@ -11,6 +11,7 @@ import { cx, formatDate, relativeTime } from '../../lib/format';
 import { errorText } from '../../lib/hooks';
 import { ChangeList, FeedbackForm, SubmittedModal } from '../inbox/JobReviewCard';
 import { AtsPill, Report, ScoreBar, StageBadge, contractLabel, fileUrl, jobPlace, type Job } from './shared';
+import { AutomationPanel } from './AutomationPanel';
 
 interface Detail {
   job: Job;
@@ -472,6 +473,7 @@ export function JobDetail({ id }: { id: string }) {
               </ul>
             </Card>
           )}
+          {['ready_to_apply', 'applying', 'sent', 'confirmed'].includes(job.stage) && <AutomationPanel jobId={job.id} stage={job.stage} />}
         </div>
       )}
 

@@ -128,7 +128,7 @@ describe('candidature automatique (AUTOPILOT)', () => {
     const [app] = await t.ctx.db.select().from(applications).where(eq(applications.jobId, jobId));
     expect(app!.submittedAt).not.toBeNull();
     expect((app!.confirmation as any)).toMatchObject({ source: 'page' });
-    expect((app!.confirmation as any).text).toContain('thank you for applying');
+    expect((app!.confirmation as any).text).toMatch(/Thank you for applying/);
     expect((await t.ctx.db.select().from(jobs).where(eq(jobs.id, jobId)))[0]!.stage).toBe('confirmed');
     const [attempt] = await t.ctx.db.select().from(applicationAttempts).where(eq(applicationAttempts.applicationId, app!.id));
     expect(attempt).toMatchObject({ status: 'submitted', platform: 'greenhouse', mode: 'auto' });

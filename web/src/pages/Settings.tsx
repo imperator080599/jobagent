@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react';
 import { useLocation, useParams } from 'wouter';
 import type { SettingKey, SettingValue } from '../../../src/shared/settings';
 import { Alert, Badge, Button, Card, CardHeader, Field, Input, Loading, Modal, PageHeader, Select, Switch, Tabs, useToast } from '../components/ui';
+import { AutopilotSettings } from './settings/Autopilot';
 import { del, get, post } from '../lib/api';
 import { formatDate, relativeTime } from '../lib/format';
 import { errorText, useAuthStatus, useDraft, useSecret, useSetting, useSettings } from '../lib/hooks';
@@ -105,7 +106,7 @@ function ApplicationSettings() {
           {(
             [
               { id: 'validation', title: 'Validation', text: "Chaque offre analysée vous est présentée. Vous décidez, puis l'agent prépare le CV et la lettre, que vous validez avant de postuler." },
-              { id: 'autonomous', title: 'Autonome', text: "Pour les offres qui remplissent vos conditions, l'agent prépare le CV et la lettre sans attendre votre avis sur l'offre. Vous validez toujours les documents, et le dépôt de la candidature reste entre vos mains." },
+              { id: 'autonomous', title: 'Autonome', text: "Pour les offres qui remplissent vos conditions, l'agent prépare le CV et la lettre sans attendre votre avis sur l'offre. L'envoi suit vos règles AUTOPILOT ci-dessous." },
             ] as const
           ).map((o) => (
             <button
@@ -124,6 +125,8 @@ function ApplicationSettings() {
         </div>
       </Card>
 
+      <AutopilotSettings />
+
       {mode.value === 'autonomous' && (
         <SettingCard settingKey="application.autonomous" title="Conditions du mode autonome" description="La préparation des documents ne démarre seule que si toutes ces conditions sont réunies. Une annonce suspecte ou comportant un point bloquant vous est toujours soumise.">
           {(v, set) => (
@@ -133,6 +136,7 @@ function ApplicationSettings() {
                 <NumberField label="Priorité minimale" value={v.minPriority} min={0} max={100} suffix="/100" onChange={(n) => set({ ...v, minPriority: n })} />
                 <NumberField label="Préparations par jour (maximum)" value={v.maxPerDay} min={0} max={50} onChange={(n) => set({ ...v, maxPerDay: n })} />
               </div>
+              <Switch checked={v.autoApproveDocuments} onChange={(autoApproveDocuments) => set({ ...v, autoApproveDocuments })} label="Valider automatiquement les documents qui passent tous les contrôles" description="CV et lettre sans anomalie de rendu ni affirmation à vérifier. Sinon, ils vous sont soumis." />
             </div>
           )}
         </SettingCard>

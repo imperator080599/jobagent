@@ -264,10 +264,16 @@
   ];
 
   function confirmation() {
-    const text = N(T(document.body)).slice(0, 40000);
+    // Recherche sur le texte normalisé ; restitution du passage tel qu'il est affiché (mêmes positions).
+    const original = T(document.body).slice(0, 40000);
+    const text = N(original);
     for (const re of CONFIRM) {
       const m = re.exec(text);
-      if (m) return { text: text.slice(Math.max(0, m.index - 80), m.index + m[0].length + 160), url: location.href };
+      if (!m) continue;
+      const from = Math.max(0, m.index - 80);
+      const to = m.index + m[0].length + 160;
+      const shown = original.length === text.length ? original.slice(from, to) : text.slice(from, to);
+      return { text: shown.trim(), url: location.href };
     }
     return null;
   }

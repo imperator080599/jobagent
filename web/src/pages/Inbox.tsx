@@ -5,6 +5,7 @@ import { Badge, Button, Card, EmptyState, IconButton, Loading, PageHeader, useTo
 import { get, post } from '../lib/api';
 import { relativeTime } from '../lib/format';
 import { errorText } from '../lib/hooks';
+import { HandoffCard, ManualCard, QuestionsCard, VerifyCard } from './inbox/ApplyCards';
 import { JobReviewCard } from './inbox/JobReviewCard';
 
 export interface ActionItem {
@@ -36,6 +37,8 @@ const TYPE_LABELS: Record<string, { label: string; tone: 'brand' | 'warning' | '
   'interview.detected': { label: 'Entretien', tone: 'success' },
   'followup.due': { label: 'Relance', tone: 'info' },
   'system.alert': { label: 'Alerte', tone: 'danger' },
+  'job.ats_problem': { label: 'Analyse ATS', tone: 'danger' },
+  'job.needs_text': { label: 'Annonce à compléter', tone: 'warning' },
 };
 
 function linkFor(item: ActionItem): string | null {
@@ -72,6 +75,15 @@ export function InboxPage() {
       ) : (
         <ul className="space-y-3">
           {items.map((item) => {
+            const apply = { 'application.questions': QuestionsCard, 'application.handoff': HandoffCard, 'application.verify': VerifyCard, 'application.manual': ManualCard }[item.type];
+            if (apply) {
+              const C = apply;
+              return (
+                <li key={item.id}>
+                  <C item={item} onDone={refresh} />
+                </li>
+              );
+            }
             if (item.type === 'job.review' || item.type === 'application.validate' || item.type === 'application.submit') {
               return (
                 <li key={item.id}>

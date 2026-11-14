@@ -4,6 +4,7 @@ import { Link } from 'wouter';
 import { Button, Card, CardHeader, Loading, PageHeader } from '../components/ui';
 import { get } from '../lib/api';
 import { useAuthStatus } from '../lib/hooks';
+import { AutopilotStrip } from './dashboard/Autopilot';
 import { DashboardStats } from './dashboard/Stats';
 
 interface Summary {
@@ -67,6 +68,7 @@ export function DashboardPage() {
           </ul>
         </Card>
       )}
+      <AutopilotStrip />
       <DashboardStats />
     </>
   );

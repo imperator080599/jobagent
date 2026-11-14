@@ -107,7 +107,7 @@ describe('extension de navigateur', () => {
     const [job] = await t.ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
     expect(job!.stage).toBe('confirmed');
     const [app] = await t.ctx.db.select().from(applications).where(eq(applications.jobId, jobId));
-    expect((app!.confirmation as any).text).toContain('thank you for applying');
+    expect((app!.confirmation as any).text).toMatch(/Thank you for applying/);
     await context.close();
   }, 90_000);
 

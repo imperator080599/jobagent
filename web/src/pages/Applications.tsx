@@ -42,7 +42,15 @@ export function ApplicationsPage() {
   const now = Date.now();
   return (
     <>
-      <PageHeader title="Candidatures" description="Une seule candidature par offre. Une candidature n'est notée « envoyée » que lorsque vous l'avez déclarée, et « confirmée » qu'avec un accusé de réception." />
+      <PageHeader
+        title="Candidatures"
+        description="Une seule candidature par offre. Elle n'est notée « envoyée » qu'avec une confirmation réelle (page de confirmation, accusé de réception ou votre déclaration)."
+        actions={
+          <a href="/api/apply/extension-package" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 ring-inset hover:bg-slate-50" title="Remplit vos formulaires dans votre navigateur quand l'envoi vous revient (CAPTCHA, compte candidat…)">
+            Extension de navigateur
+          </a>
+        }
+      />
       <Tabs className="mb-3" tabs={(Object.keys(VIEWS) as View[]).map((id) => ({ id, label: VIEWS[id].label, count: all.filter((r) => VIEWS[id].stages.includes(r.stage)).length }))} value={view} onChange={setView} />
       {items.length === 0 ? (
         <Card>
